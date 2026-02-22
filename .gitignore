@@ -1,0 +1,11 @@
+/target/
+/out/
+*.ko
+*.o
+*.cmd
+*.mod
+*.mod.c
+*.symvers
+modules.order
+Module.symvers
+.kernel-version
