@@ -10,3 +10,16 @@ IMAGE ?= vgadash-dev
 all:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
 	$(MAKE) -C $(KDIR) M=$(PWD)/kernel modules
+
+clean:
+	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
+	$(MAKE) -C $(KDIR) M=$(PWD)/kernel clean
+
+
+
+docker-build:
+	docker build -t $(IMAGE) -f docker/Dockerfile .
+
+docker-test:
+	docker run --rm -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py test
