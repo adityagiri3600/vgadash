@@ -38,3 +38,11 @@ make KVER=5.15.0-164-generic
 ```bash
 python3 tools/vgadash_ci.py test --kver 5.15.0-164-generic
 ```
+
+### Is this just `journalctl -k`?
+
+So `journalctl -k` depends on `systemd-journald` and journal persistence. What will you do if journald is dead, userspace is dead or disk access is dead?
+
+This thing on the other hand registers a kernel console callback and captures printk output into a module-owned ring buffer!
+
+### Usage inside the machine
