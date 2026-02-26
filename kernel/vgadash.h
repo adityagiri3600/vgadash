@@ -16,3 +16,29 @@ enum vgadash_page {
 	VGADASH_PAGE_LOGS  = 1,
 };
 
+struct vgadash_ctx {
+	bool active;
+	enum vgadash_page page;
+
+
+	void __iomem *vga_mem;
+	u16 saved[VGA_CELLS];
+	bool cursor_saved;
+	u8 cursor_start_saved;
+	u8 cursor_end_saved;
+
+
+	struct dentry *dbg_dir;
+};
+
+extern struct vgadash_ctx g_vgadash;
+
+void vgadash_render(void);
+void vgadash_toggle(void);
+int  vgadash_set_page(enum vgadash_page p);
+
+
+int  vgadash_debugfs_init(void);
+void vgadash_debugfs_exit(void);
+
+#endif
