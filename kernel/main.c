@@ -35,3 +35,46 @@ static void render_header(void)
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 0, buf, attr);
 }
 
+void vgadash_render(void)
+{
+	if (!g_vgadash.vga_mem)
+		return;
+
+	vga_text_clear(g_vgadash.vga_mem, 0x07, VGA_CELLS);
+	render_header();
+	vga_text_puts_at(g_vgadash.vga_mem, 0, 1,
+			 "--------------------------------------------------------------------------------", 0x08);
+
+	if (g_vgadash.page == VGADASH_PAGE_STATE)
+		page_state_render_vga();
+	else
+		page_logs_render_vga();
+}
+
+void vgadash_toggle(void)
+{
+	int ret;
+
+	if (!g_vgadash.active) {
+		ret = vga_text_ensure_mapped(&g_vgadash.vga_mem);
+		if (ret) {
+			pr_err(VGADASH_NAME ": ioremap VGA failed: %d\n", ret);
+			return;
+		}
+
+		vga_text_save(g_vgadash.vga_mem, g_vgadash.saved, VGA_CELLS);
+		vga_cursor_save_and_disable(&g_vgadash.cursor_start_saved,
+					    &g_vgadash.cursor_end_saved,
+					    &g_vgadash.cursor_saved);
+
+		g_vgadash.active = true;
+		vgadash_render();
+	} else {
+		vga_text_restore(g_vgadash.vga_mem, g_vgadash.saved, VGA_CELLS);
+		vga_cursor_restore(g_vgadash.cursor_start_saved,
+				   g_vgadash.cursor_end_saved,
+				   g_vgadash.cursor_saved);
+
+		g_vgadash.active = false;
+	}
+}
