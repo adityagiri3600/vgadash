@@ -78,3 +78,30 @@ void vgadash_toggle(void)
 		g_vgadash.active = false;
 	}
 }
+
+int vgadash_set_page(enum vgadash_page p)
+{
+	g_vgadash.page = p;
+	if (g_vgadash.active)
+		vgadash_render();
+	return 0;
+}
+
+static int __init vgadash_init(void)
+{
+	int ret;
+
+	memset(&g_vgadash, 0, sizeof(g_vgadash));
+	g_vgadash.page = VGADASH_PAGE_STATE;
+
+	ret = vgadash_debugfs_init();
+	if (ret)
+		return ret;
+
+
+	vgadash_logtap_init();
+    vgadash_sysrq_init();
+
+	pr_info(VGADASH_NAME ": loaded (console-tap logs enabled)\n");
+	return 0;
+}
