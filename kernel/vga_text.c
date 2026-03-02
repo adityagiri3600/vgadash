@@ -71,3 +71,31 @@ void vga_text_restore(void __iomem *vga_mem, const u16 *saved, int cells)
 		writew(saved[i], &vga[i]);
 }
 
+
+void vga_cursor_save_and_disable(u8 *start_saved, u8 *end_saved, bool *saved_flag)
+{
+
+	outb(0x0A, 0x3D4);
+	*start_saved = inb(0x3D5);
+
+	outb(0x0B, 0x3D4);
+	*end_saved = inb(0x3D5);
+
+	*saved_flag = true;
+
+
+	outb(0x0A, 0x3D4);
+	outb((*start_saved) | 0x20, 0x3D5);
+}
+
+void vga_cursor_restore(u8 start_saved, u8 end_saved, bool saved_flag)
+{
+	if (!saved_flag)
+		return;
+
+	outb(0x0A, 0x3D4);
+	outb(start_saved, 0x3D5);
+
+	outb(0x0B, 0x3D4);
+	outb(end_saved, 0x3D5);
+}
