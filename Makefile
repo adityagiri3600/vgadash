@@ -23,3 +23,16 @@ docker-build:
 docker-test:
 	docker run --rm -v "$(PWD):/work" -w /work $(IMAGE) \
 	  python3 tools/vgadash_ci.py test
+
+docker-demo:
+	docker run --rm -it -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py demo --display curses --interactive --timeout 0
+
+docker-shell:
+	docker run --rm -it -v "$(PWD):/work" -w /work $(IMAGE) bash
+
+docker-demo-vnc:
+	docker run --rm -it \
+	  -p 5901:5901 \
+	  -v "$(PWD):/work" -w /work vgadash-dev \
+	  python3 tools/vgadash_ci.py demo --display vnc --vnc-display 1 --interactive --timeout 0
