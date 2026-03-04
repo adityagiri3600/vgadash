@@ -35,3 +35,32 @@ static struct console vgadash_console = {
 	.index = -1,
 };
 
+int vgadash_logtap_init(void)
+{
+	register_console(&vgadash_console);
+	return 0;
+}
+
+void vgadash_logtap_exit(void)
+{
+	unregister_console(&vgadash_console);
+}
+
+size_t vgadash_logtap_snapshot(char *dst, size_t cap)
+{
+	unsigned long flags;
+	u32 take, start;
+	size_t i;
+
+	spin_lock_irqsave(&log_lock, flags);
+
+	take = (log_len < cap) ? log_len : (u32)cap;
+	start = (log_head + LOGBUF_SIZE - take) % LOGBUF_SIZE;
+
+	for (i = 0; i < take; i++)
+		dst[i] = logbuf[(start + i) % LOGBUF_SIZE];
+
+	spin_unlock_irqrestore(&log_lock, flags);
+
+	return take;
+}
