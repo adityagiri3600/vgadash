@@ -22,3 +22,29 @@ static int sysrq_keycode(void)
 		return 'v';
 	return (unsigned char)sysrq_key[0];
 }
+
+static void vgadash_sysrq_workfn(struct work_struct *w);
+static DECLARE_WORK(vgadash_sysrq_work, vgadash_sysrq_workfn);
+
+static void vgadash_sysrq_workfn(struct work_struct *w)
+{
+	vgadash_toggle();
+	atomic_set(&sysrq_pending, 0);
+}
+
+static void vgadash_sysrq_handler(int key)
+{
+	(void)key;
+
+	if (atomic_cmpxchg(&sysrq_pending, 0, 1) != 0)
+		return;
+
+	schedule_work(&vgadash_sysrq_work);
+}
+
+static struct sysrq_key_op vgadash_sysrq_op = {
+	.handler     = vgadash_sysrq_handler,
+	.help_msg    = "vgadash(v)",
+	.action_msg  = "Toggle VGADASH overlay",
+	.enable_mask = SYSRQ_ENABLE_KEYBOARD,
+};
