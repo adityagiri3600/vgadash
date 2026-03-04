@@ -82,3 +82,112 @@ def build_module(kver: str) -> Path:
         raise FileNotFoundError(f"Expected module not found: {ko}")
 
     return ko
+
+
+def make_initramfs(out_path: Path, ko_path: Path, *, marker: str, interactive: bool) -> None:
+    busybox = Path("/bin/busybox")
+    if not busybox.exists():
+        bb = shutil.which("busybox")
+        if not bb:
+            raise FileNotFoundError("busybox not found (install busybox-static)")
+        busybox = Path(bb)
+
+    with tempfile.TemporaryDirectory(prefix="vgadash_initramfs_") as td:
+        root = Path(td)
+
+
+        for d in [
+            "bin", "sbin", "etc", "proc", "sys", "dev", "tmp",
+            "sys/kernel/debug",
+        ]:
+            (root / d).mkdir(parents=True, exist_ok=True)
+
+
+        shutil.copy2(busybox, root / "bin" / "busybox")
+        applets = [
+            "sh", "mount", "mkdir", "insmod", "dmesg", "cat", "echo", "sleep",
+            "poweroff", "reboot", "tee", "cttyhack",
+        ]
+        for a in applets:
+            link = root / "bin" / a
+            if link.exists():
+                link.unlink()
+            link.symlink_to("busybox")
+
+
+        shutil.copy2(ko_path, root / "vgadash.ko")
+
+        init = root / "init"
+        init.write_text(f"""#!/bin/sh
+set -eu
+
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mount -t debugfs none /sys/kernel/debug || true
+
+echo "[init] inserting vgadash.ko..."
+insmod /vgadash.ko || {{
+  echo "[init] insmod failed"
+  dmesg | tail -n 80
+  exec /bin/sh
+}}
+
+echo "[init] mount debugfs + toggle dashboard..."
+mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+
+
+echo logs > /sys/kernel/debug/vgadash/page || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+
+
+echo "{marker}" > /dev/kmsg || true
+
+
+echo logs > /sys/kernel/debug/vgadash/page || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+
+echo "===== VGADASH SNAPSHOT BEGIN =====" > /dev/ttyS0
+cat /sys/kernel/debug/vgadash/snapshot > /dev/ttyS0 || true
+echo "===== VGADASH SNAPSHOT END =====" > /dev/ttyS0
+
+echo "[init] done"
+{"exec /bin/cttyhack /bin/sh" if interactive else "poweroff -f"}
+""")
+        init.chmod(0o755)
+
+
+        find_p = subprocess.Popen(
+            ["find", ".", "-print0"],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        cpio_p = subprocess.Popen(
+            ["cpio", "--null", "-ov", "--format=newc"],
+            cwd=root,
+            stdin=find_p.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert cpio_p.stdout is not None
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(out_path, "wb", compresslevel=9) as gz:
+            while True:
+                chunk = cpio_p.stdout.read(65536)
+                if not chunk:
+                    break
+                gz.write(chunk)
+
+        find_out, find_err = find_p.communicate()
+        cpio_out, cpio_err = cpio_p.communicate()
+
+        if find_p.returncode != 0:
+            raise RuntimeError(f"find failed: {find_err.decode(errors='ignore')}")
+        if cpio_p.returncode != 0:
+            raise RuntimeError(f"cpio failed: {cpio_err.decode(errors='ignore')}")
+
+
