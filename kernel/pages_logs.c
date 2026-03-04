@@ -41,3 +41,37 @@ void page_logs_render_vga(void)
 		kfree(lines);
 		return;
 	}
+
+	n = vgadash_logtap_snapshot(snap, SNAP_CAP);
+	snap[n] = '\0';
+
+	vga_text_puts_at(g_vgadash.vga_mem, 0, 2,
+			 "Last console-emitted kernel log lines (post-load):", 0x0F);
+
+	if (n == 0) {
+		vga_text_puts_at(g_vgadash.vga_mem, 0, 4, "(no captured logs yet)", 0x07);
+		kfree(snap);
+		kfree(lines);
+		return;
+	}
+
+
+	extract_last_lines(snap, (int)n, lines, max_lines, 80);
+
+
+	for (i = 0; i < max_lines; i++) {
+		char tmp[81];
+		char *s;
+
+		memcpy(tmp, lines[i], 81);
+		tmp[80] = '\0';
+
+		s = strip_prio(tmp);
+		sanitize_line(s);
+
+		vga_text_puts_at(g_vgadash.vga_mem, 0, 3 + i, s, 0x07);
+	}
+
+	kfree(snap);
+	kfree(lines);
+}
