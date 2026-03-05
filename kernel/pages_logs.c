@@ -75,3 +75,54 @@ void page_logs_render_vga(void)
 	kfree(snap);
 	kfree(lines);
 }
+
+void page_logs_snapshot(struct seq_file *m)
+{
+	char *snap;
+	size_t n;
+	char (*lines)[81];
+	int i;
+
+	const int max_lines = (VGA_ROWS - 3);
+
+	lines = kmalloc_array(max_lines, sizeof(*lines), GFP_KERNEL);
+	if (!lines) {
+		seq_puts(m, "logs: kmalloc(lines) failed\n");
+		return;
+	}
+
+	snap = kmalloc(SNAP_CAP + 1, GFP_KERNEL);
+	if (!snap) {
+		seq_puts(m, "logs: kmalloc(snap) failed\n");
+		kfree(lines);
+		return;
+	}
+
+	n = vgadash_logtap_snapshot(snap, SNAP_CAP);
+	snap[n] = '\0';
+
+	if (n == 0) {
+		seq_puts(m, "(no captured logs yet)\n");
+		kfree(snap);
+		kfree(lines);
+		return;
+	}
+
+	extract_last_lines(snap, (int)n, lines, max_lines, 80);
+
+	for (i = 0; i < max_lines; i++) {
+		char tmp[81];
+		char *s;
+
+		memcpy(tmp, lines[i], 81);
+		tmp[80] = '\0';
+
+		s = strip_prio(tmp);
+		sanitize_line(s);
+
+		trim_and_print_seq(m, s);
+	}
+
+	kfree(snap);
+	kfree(lines);
+}
