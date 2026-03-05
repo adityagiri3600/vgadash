@@ -105,3 +105,29 @@ static int __init vgadash_init(void)
 	pr_info(VGADASH_NAME ": loaded (console-tap logs enabled)\n");
 	return 0;
 }
+
+static void __exit vgadash_exit(void)
+{
+	vgadash_logtap_exit();
+    vgadash_sysrq_exit();
+
+
+	if (g_vgadash.active)
+		vgadash_toggle();
+
+	vgadash_debugfs_exit();
+
+	if (g_vgadash.vga_mem) {
+		iounmap(g_vgadash.vga_mem);
+		g_vgadash.vga_mem = NULL;
+	}
+
+	pr_info(VGADASH_NAME ": unloaded\n");
+}
+
+module_init(vgadash_init);
+module_exit(vgadash_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("aditya");
+MODULE_DESCRIPTION("In-kernel VGA text dashboard (logs via console-tap)");
