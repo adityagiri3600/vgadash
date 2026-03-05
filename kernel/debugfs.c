@@ -64,3 +64,51 @@ static const struct file_operations page_fops = {
 	.llseek = no_llseek,
 };
 
+static int snapshot_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "VGADASH page=%s active=%d\n",
+		   (g_vgadash.page == VGADASH_PAGE_STATE) ? "state" : "logs",
+		   g_vgadash.active ? 1 : 0);
+	seq_puts(m, "--------------------------------------------------------------------------------\n");
+
+	if (g_vgadash.page == VGADASH_PAGE_STATE)
+		page_state_snapshot(m);
+	else
+		page_logs_snapshot(m);
+
+	return 0;
+}
+
+static int snapshot_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, snapshot_show, NULL);
+}
+
+static const struct file_operations snapshot_fops = {
+	.owner   = THIS_MODULE,
+	.open    = snapshot_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = single_release,
+};
+
+int vgadash_debugfs_init(void)
+{
+	g_vgadash.dbg_dir = debugfs_create_dir("vgadash", NULL);
+	if (!g_vgadash.dbg_dir)
+		return -ENOMEM;
+
+	debugfs_create_file("toggle", 0200, g_vgadash.dbg_dir, NULL, &toggle_fops);
+	debugfs_create_file("page",   0600, g_vgadash.dbg_dir, NULL, &page_fops);
+	debugfs_create_file("snapshot", 0400, g_vgadash.dbg_dir, NULL, &snapshot_fops);
+
+	return 0;
+}
+
+void vgadash_debugfs_exit(void)
+{
+	if (g_vgadash.dbg_dir) {
+		debugfs_remove_recursive(g_vgadash.dbg_dir);
+		g_vgadash.dbg_dir = NULL;
+	}
+}
