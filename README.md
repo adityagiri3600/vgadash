@@ -46,3 +46,11 @@ So `journalctl -k` depends on `systemd-journald` and journal persistence. What w
 This thing on the other hand registers a kernel console callback and captures printk output into a module-owned ring buffer!
 
 ### Usage inside the machine
+```bash
+echo 1 > /sys/kernel/debug/vgadash/toggle
+
+echo state > /sys/kernel/debug/vgadash/page
+echo logs  > /sys/kernel/debug/vgadash/page
+
+cat /sys/kernel/debug/vgadash/snapshot
+```
