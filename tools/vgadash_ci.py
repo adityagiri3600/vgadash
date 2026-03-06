@@ -276,3 +276,82 @@ def assert_snapshot(serial_out: str, marker: str) -> None:
         print("WARN: snapshot did not include 'page=logs' (still ok if state page printed)", file=sys.stderr)
 
 
+def publish_result_amqp(amqp_url: str, payload: dict) -> None:
+    import pika
+    params = pika.URLParameters(amqp_url)
+    conn = pika.BlockingConnection(params)
+    ch = conn.channel()
+    ch.exchange_declare(exchange="vgadash", exchange_type="topic", durable=False)
+    body = json.dumps(payload).encode("utf-8")
+    ch.basic_publish(exchange="vgadash", routing_key="test.result", body=body)
+    conn.close()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="VGADASH build/test runner (Docker-friendly, no shell scripts)")
+    ap.add_argument("cmd", choices=["build", "test", "demo"], help="Action")
+    ap.add_argument("--kver", default=None, help="Kernel version to use (auto-detect if omitted)")
+    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="QEMU timeout seconds")
+    ap.add_argument("--marker", default="HELLO_FROM_VGADASH_TEST", help="Marker string injected into /dev/kmsg")
+    ap.add_argument("--display", default="none", help="QEMU display: none|curses|gtk|sdl")
+    ap.add_argument("--interactive", action="store_true", help="Drop to shell in guest (initramfs)")
+    ap.add_argument("--vnc-display", type=int, default=1, help="QEMU VNC display number (port=5900+N)")
+    ap.add_argument("--amqp-url", default=None, help="Optional AMQP URL to publish test results")
+    args = ap.parse_args()
+
+    kver = detect_kver(args.kver)
+    vmlinuz, _headers = kernel_paths(kver)
+
+    if args.cmd == "build":
+        ko = build_module(kver)
+        print(f"Built module: {ko}")
+        return
+
+
+    ko = build_module(kver)
+
+    out_dir = REPO_ROOT / "out"
+    initramfs = out_dir / f"initramfs-{kver}.cpio.gz"
+    make_initramfs(initramfs, ko, marker=args.marker, interactive=(args.interactive or args.cmd == "demo"))
+
+    display = args.display
+    if args.cmd == "demo" and display == "none":
+        display = "vnc"
+
+
+    capture_output = (args.cmd != "demo")
+    serial_out = run_qemu(
+        vmlinuz,
+        initramfs,
+        timeout_s=args.timeout,
+        display=display,
+        vnc_display=args.vnc_display,
+        capture_output=capture_output,
+    )
+    if serial_out:
+        print(serial_out)
+
+    if args.cmd == "test":
+        ok = True
+        err = None
+        try:
+            assert_snapshot(serial_out, args.marker)
+        except Exception as e:
+            ok = False
+            err = str(e)
+            raise
+        finally:
+            if args.amqp_url:
+                payload = {
+                    "project": "vgadash",
+                    "cmd": args.cmd,
+                    "kver": kver,
+                    "ok": ok,
+                    "marker": args.marker,
+                    "error": err,
+                }
+                publish_result_amqp(args.amqp_url, payload)
+
+
+if __name__ == "__main__":
+    main()
