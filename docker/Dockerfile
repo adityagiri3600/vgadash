@@ -1,0 +1,18 @@
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3 python3-pip \
+    qemu-system-x86 \
+    busybox-static \
+    cpio \
+    && rm -rf /var/lib/apt/lists/*
+
+
+
+RUN apt-get update && apt-get install -y \
+    linux-image-generic linux-headers-generic \
+    && rm -rf /var/lib/apt/lists/*
+
