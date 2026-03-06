@@ -48,3 +48,31 @@ static struct sysrq_key_op vgadash_sysrq_op = {
 	.action_msg  = "Toggle VGADASH overlay",
 	.enable_mask = SYSRQ_ENABLE_KEYBOARD,
 };
+
+int vgadash_sysrq_init(void)
+{
+	int key = sysrq_keycode();
+	int ret;
+
+	ret = register_sysrq_key(key, &vgadash_sysrq_op);
+	if (ret) {
+		pr_warn(VGADASH_NAME ": SysRq register '%c' failed: %d (key busy or sysrq disabled)\n",
+		        key, ret);
+		sysrq_registered = false;
+		return ret;
+	}
+
+	sysrq_registered = true;
+	pr_info(VGADASH_NAME ": SysRq toggle enabled (Alt+SysRq+%c)\n", key);
+	return 0;
+}
+
+void vgadash_sysrq_exit(void)
+{
+	if (sysrq_registered) {
+		unregister_sysrq_key(sysrq_keycode(), &vgadash_sysrq_op);
+		sysrq_registered = false;
+	}
+
+	cancel_work_sync(&vgadash_sysrq_work);
+}
