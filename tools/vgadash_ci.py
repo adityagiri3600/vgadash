@@ -191,3 +191,88 @@ echo "[init] done"
             raise RuntimeError(f"cpio failed: {cpio_err.decode(errors='ignore')}")
 
 
+def run_qemu(
+    vmlinuz: Path,
+    initramfs: Path,
+    *,
+    timeout_s: int,
+    display: str,
+    vnc_display: int,
+    capture_output: bool,
+) -> str:
+
+    args = [
+        "qemu-system-x86_64",
+        "-m", "512",
+        "-accel", "tcg",
+        "-kernel", str(vmlinuz),
+        "-initrd", str(initramfs),
+        "-append", "console=ttyS0,115200 rdinit=/init nomodeset ignore_loglevel loglevel=7",
+        "-serial", "stdio",
+        "-no-reboot",
+    ]
+
+    if display == "none":
+        args += ["-display", "none", "-monitor", "none"]
+    elif display == "curses":
+        args += ["-display", "curses", "-monitor", "none"]
+    elif display == "vnc":
+
+
+        args += ["-display", "none", "-vnc", f"0.0.0.0:{vnc_display}", "-monitor", "none"]
+    else:
+        args += ["-display", display, "-monitor", "none"]
+
+
+
+    popen_kwargs = {"text": True}
+    if capture_output:
+        popen_kwargs["stdout"] = subprocess.PIPE
+        popen_kwargs["stderr"] = subprocess.STDOUT
+
+    proc = subprocess.Popen(args, **popen_kwargs)
+    out = ""
+    try:
+        if capture_output:
+            if timeout_s and timeout_s > 0:
+                out, _ = proc.communicate(timeout=timeout_s)
+            else:
+                out, _ = proc.communicate()
+        else:
+            if timeout_s and timeout_s > 0:
+                proc.wait(timeout=timeout_s)
+            else:
+                proc.wait()
+    except subprocess.TimeoutExpired as e:
+        proc.kill()
+        if capture_output:
+            tail, _ = proc.communicate()
+            partial = e.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode(errors="replace")
+            out = f"{partial}{tail or ''}\n[TIMEOUT]\n"
+        else:
+            out = "\n[TIMEOUT]\n"
+        raise RuntimeError(out)
+
+    if proc.returncode not in (0, None):
+        if capture_output:
+            raise RuntimeError(out or f"qemu failed with exit code {proc.returncode}")
+        raise RuntimeError(f"qemu failed with exit code {proc.returncode}")
+
+    return out or ""
+
+
+def assert_snapshot(serial_out: str, marker: str) -> None:
+    if "===== VGADASH SNAPSHOT BEGIN =====" not in serial_out:
+        raise AssertionError("Did not find snapshot BEGIN marker in serial output")
+    if "===== VGADASH SNAPSHOT END =====" not in serial_out:
+        raise AssertionError("Did not find snapshot END marker in serial output")
+    if marker not in serial_out:
+        raise AssertionError(f"Did not find marker '{marker}' in snapshot/serial output")
+
+
+    if "page=logs" not in serial_out:
+        print("WARN: snapshot did not include 'page=logs' (still ok if state page printed)", file=sys.stderr)
+
+
