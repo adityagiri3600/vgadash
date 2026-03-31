@@ -20,6 +20,26 @@ static void trim_and_print_seq(struct seq_file *m, char *line)
 	seq_printf(m, "%s\n", line);
 }
 
+static void render_logs_privacy_notice(size_t bytes_captured)
+{
+	char line[80];
+
+	vga_text_puts_at(g_vgadash.vga_mem, 0, 2, "Kernel logs hidden in privacy mode.", 0x0F);
+	snprintf(line, sizeof(line), "Captured log buffer: %llu bytes",
+		 (unsigned long long)bytes_captured);
+	vga_text_puts_at(g_vgadash.vga_mem, 0, 4, line, 0x07);
+	vga_text_puts_at(g_vgadash.vga_mem, 0, 6,
+			 "Disable privacy mode to inspect raw kernel log lines.", 0x07);
+}
+
+static void snapshot_logs_privacy_notice(struct seq_file *m, size_t bytes_captured)
+{
+	seq_puts(m, "Kernel logs hidden in privacy mode.\n");
+	seq_printf(m, "Captured log buffer: %llu bytes\n",
+		   (unsigned long long)bytes_captured);
+	seq_puts(m, "Disable privacy mode to inspect raw kernel log lines.\n");
+}
+
 void page_logs_render_vga(void)
 {
 	char *snap;
@@ -44,6 +64,13 @@ void page_logs_render_vga(void)
 
 	n = vgadash_logtap_snapshot(snap, SNAP_CAP);
 	snap[n] = '\0';
+
+	if (g_vgadash.privacy_mode) {
+		render_logs_privacy_notice(n);
+		kfree(snap);
+		kfree(lines);
+		return;
+	}
 
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 2,
 			 "Last console-emitted kernel log lines (post-load):", 0x0F);
@@ -100,6 +127,13 @@ void page_logs_snapshot(struct seq_file *m)
 
 	n = vgadash_logtap_snapshot(snap, SNAP_CAP);
 	snap[n] = '\0';
+
+	if (g_vgadash.privacy_mode) {
+		snapshot_logs_privacy_notice(m, n);
+		kfree(snap);
+		kfree(lines);
+		return;
+	}
 
 	if (n == 0) {
 		seq_puts(m, "(no captured logs yet)\n");

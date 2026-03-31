@@ -12,6 +12,7 @@ make docker-build
 ### Test
 ```bash
 make docker-test
+make docker-test-privacy
 ```
 
 ### Running without Docker (Linux/WSL only)
@@ -52,5 +53,11 @@ echo 1 > /sys/kernel/debug/vgadash/toggle
 echo state > /sys/kernel/debug/vgadash/page
 echo logs  > /sys/kernel/debug/vgadash/page
 
+echo on  > /sys/kernel/debug/vgadash/privacy
+echo off > /sys/kernel/debug/vgadash/privacy
+
 cat /sys/kernel/debug/vgadash/snapshot
 ```
+
+### Privacy Mode
+`privacy` mode is a host-global redaction mode for multi-user systems. It does not create per-user dashboards at the VGA layer, but it avoids exposing raw kernel logs and current task identity on the screen.

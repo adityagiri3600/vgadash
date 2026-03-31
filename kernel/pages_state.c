@@ -35,7 +35,11 @@ void page_state_render_vga(void)
 		 (unsigned long long)total_mib, (unsigned long long)free_mib);
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 5, line, 0x07);
 
-	snprintf(line, sizeof(line), "This CPU task: pid=%d comm=%s", current->pid, current->comm);
+	if (g_vgadash.privacy_mode)
+		snprintf(line, sizeof(line), "This CPU task: [redacted in privacy mode]");
+	else
+		snprintf(line, sizeof(line), "This CPU task: pid=%d comm=%s",
+			 current->pid, current->comm);
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 7, line, 0x07);
 
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 9, "Controls:", 0x0F);
@@ -59,5 +63,8 @@ void page_state_snapshot(struct seq_file *m)
 	seq_printf(m, "CPUs online: %u\n", num_online_cpus());
 	seq_printf(m, "Mem: total %llu MiB  free %llu MiB\n",
 		   (unsigned long long)total_mib, (unsigned long long)free_mib);
-	seq_printf(m, "This CPU task: pid=%d comm=%s\n", current->pid, current->comm);
+	if (g_vgadash.privacy_mode)
+		seq_puts(m, "This CPU task: [redacted in privacy mode]\n");
+	else
+		seq_printf(m, "This CPU task: pid=%d comm=%s\n", current->pid, current->comm);
 }

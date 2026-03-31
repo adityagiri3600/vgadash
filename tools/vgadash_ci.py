@@ -84,7 +84,14 @@ def build_module(kver: str) -> Path:
     return ko
 
 
-def make_initramfs(out_path: Path, ko_path: Path, *, marker: str, interactive: bool) -> None:
+def make_initramfs(
+    out_path: Path,
+    ko_path: Path,
+    *,
+    marker: str,
+    interactive: bool,
+    privacy_test: bool,
+) -> None:
     busybox = Path("/bin/busybox")
     if not busybox.exists():
         bb = shutil.which("busybox")
@@ -117,6 +124,37 @@ def make_initramfs(out_path: Path, ko_path: Path, *, marker: str, interactive: b
 
         shutil.copy2(ko_path, root / "vgadash.ko")
 
+        if privacy_test:
+            snapshot_commands = f"""
+echo on > /sys/kernel/debug/vgadash/privacy || true
+echo state > /sys/kernel/debug/vgadash/page || true
+echo "===== VGADASH STATE SNAPSHOT BEGIN =====" > /dev/ttyS0
+cat /sys/kernel/debug/vgadash/snapshot > /dev/ttyS0 || true
+echo "===== VGADASH STATE SNAPSHOT END =====" > /dev/ttyS0
+
+echo "{marker}" > /dev/kmsg || true
+echo logs > /sys/kernel/debug/vgadash/page || true
+echo "===== VGADASH LOGS SNAPSHOT BEGIN =====" > /dev/ttyS0
+cat /sys/kernel/debug/vgadash/snapshot > /dev/ttyS0 || true
+echo "===== VGADASH LOGS SNAPSHOT END =====" > /dev/ttyS0
+"""
+        else:
+            snapshot_commands = f"""
+echo logs > /sys/kernel/debug/vgadash/page || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+
+echo "{marker}" > /dev/kmsg || true
+
+echo logs > /sys/kernel/debug/vgadash/page || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+echo 1 > /sys/kernel/debug/vgadash/toggle || true
+
+echo "===== VGADASH SNAPSHOT BEGIN =====" > /dev/ttyS0
+cat /sys/kernel/debug/vgadash/snapshot > /dev/ttyS0 || true
+echo "===== VGADASH SNAPSHOT END =====" > /dev/ttyS0
+"""
+
         init = root / "init"
         init.write_text(f"""#!/bin/sh
 set -eu
@@ -136,22 +174,7 @@ insmod /vgadash.ko || {{
 echo "[init] mount debugfs + toggle dashboard..."
 mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
 
-
-echo logs > /sys/kernel/debug/vgadash/page || true
-echo 1 > /sys/kernel/debug/vgadash/toggle || true
-
-
-echo "{marker}" > /dev/kmsg || true
-
-
-echo logs > /sys/kernel/debug/vgadash/page || true
-echo 1 > /sys/kernel/debug/vgadash/toggle || true
-echo 1 > /sys/kernel/debug/vgadash/toggle || true
-echo 1 > /sys/kernel/debug/vgadash/toggle || true
-
-echo "===== VGADASH SNAPSHOT BEGIN =====" > /dev/ttyS0
-cat /sys/kernel/debug/vgadash/snapshot > /dev/ttyS0 || true
-echo "===== VGADASH SNAPSHOT END =====" > /dev/ttyS0
+{snapshot_commands}
 
 echo "[init] done"
 {"exec /bin/cttyhack /bin/sh" if interactive else "poweroff -f"}
@@ -276,6 +299,38 @@ def assert_snapshot(serial_out: str, marker: str) -> None:
         print("WARN: snapshot did not include 'page=logs' (still ok if state page printed)", file=sys.stderr)
 
 
+def _snapshot_block(serial_out: str, begin: str, end: str) -> str:
+    start = serial_out.find(begin)
+    finish = serial_out.find(end)
+    if start == -1 or finish == -1 or finish < start:
+        raise AssertionError(f"Could not locate snapshot block: {begin} .. {end}")
+    start += len(begin)
+    return serial_out[start:finish]
+
+
+def assert_privacy_snapshots(serial_out: str, marker: str) -> None:
+    state_block = _snapshot_block(
+        serial_out,
+        "===== VGADASH STATE SNAPSHOT BEGIN =====",
+        "===== VGADASH STATE SNAPSHOT END =====",
+    )
+    logs_block = _snapshot_block(
+        serial_out,
+        "===== VGADASH LOGS SNAPSHOT BEGIN =====",
+        "===== VGADASH LOGS SNAPSHOT END =====",
+    )
+
+    if "This CPU task: [redacted in privacy mode]" not in state_block:
+        raise AssertionError("State snapshot did not redact the current task")
+    if "comm=" in state_block or "pid=" in state_block:
+        raise AssertionError("State snapshot still exposed task identity fields")
+
+    if "Kernel logs hidden in privacy mode." not in logs_block:
+        raise AssertionError("Logs snapshot did not show the privacy notice")
+    if marker in logs_block:
+        raise AssertionError("Logs snapshot still exposed the marker while privacy mode was enabled")
+
+
 def publish_result_amqp(amqp_url: str, payload: dict) -> None:
     import pika
     params = pika.URLParameters(amqp_url)
@@ -289,7 +344,7 @@ def publish_result_amqp(amqp_url: str, payload: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="VGADASH build/test runner (Docker-friendly, no shell scripts)")
-    ap.add_argument("cmd", choices=["build", "test", "demo"], help="Action")
+    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo"], help="Action")
     ap.add_argument("--kver", default=None, help="Kernel version to use (auto-detect if omitted)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="QEMU timeout seconds")
     ap.add_argument("--marker", default="HELLO_FROM_VGADASH_TEST", help="Marker string injected into /dev/kmsg")
@@ -312,7 +367,13 @@ def main():
 
     out_dir = REPO_ROOT / "out"
     initramfs = out_dir / f"initramfs-{kver}.cpio.gz"
-    make_initramfs(initramfs, ko, marker=args.marker, interactive=(args.interactive or args.cmd == "demo"))
+    make_initramfs(
+        initramfs,
+        ko,
+        marker=args.marker,
+        interactive=(args.interactive or args.cmd == "demo"),
+        privacy_test=(args.cmd == "test-privacy"),
+    )
 
     display = args.display
     if args.cmd == "demo" and display == "none":
@@ -331,11 +392,14 @@ def main():
     if serial_out:
         print(serial_out)
 
-    if args.cmd == "test":
+    if args.cmd in ("test", "test-privacy"):
         ok = True
         err = None
         try:
-            assert_snapshot(serial_out, args.marker)
+            if args.cmd == "test":
+                assert_snapshot(serial_out, args.marker)
+            else:
+                assert_privacy_snapshots(serial_out, args.marker)
         except Exception as e:
             ok = False
             err = str(e)

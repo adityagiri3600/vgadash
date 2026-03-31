@@ -5,7 +5,7 @@ PWD  := $(shell pwd)
 
 IMAGE ?= vgadash-dev
 
-.PHONY: all clean docker-build docker-test docker-demo docker-shell test demo
+.PHONY: all clean docker-build docker-test docker-test-privacy docker-demo docker-shell test demo
 
 all:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
@@ -23,6 +23,10 @@ docker-build:
 docker-test:
 	docker run --rm -v "$(PWD):/work" -w /work $(IMAGE) \
 	  python3 tools/vgadash_ci.py test
+
+docker-test-privacy:
+	docker run --rm -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py test-privacy
 
 docker-demo:
 	docker run --rm -it -v "$(PWD):/work" -w /work $(IMAGE) \

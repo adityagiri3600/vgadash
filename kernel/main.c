@@ -15,22 +15,19 @@ static void render_header(void)
 {
 	const u8 attr = 0x1F;
 	char buf[VGA_COLS + 1];
-	int i;
 
 	memset(buf, ' ', VGA_COLS);
 	buf[VGA_COLS] = '\0';
 
 	memcpy(buf, " VGADASH ", 9);
 
+	if (g_vgadash.privacy_mode)
+		memcpy(buf + 10, "[privacy:on]", 12);
+
 	if (g_vgadash.page == VGADASH_PAGE_STATE)
 		memcpy(buf + VGA_COLS - 14, "[page:state]", 12);
 	else
 		memcpy(buf + VGA_COLS - 13, "[page:logs]", 11);
-
-	for (i = 0; i < VGA_COLS; i++) {
-
-	}
-
 
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 0, buf, attr);
 }
@@ -87,6 +84,13 @@ int vgadash_set_page(enum vgadash_page p)
 	return 0;
 }
 
+void vgadash_set_privacy(bool enabled)
+{
+	g_vgadash.privacy_mode = enabled;
+	if (g_vgadash.active)
+		vgadash_render();
+}
+
 static int __init vgadash_init(void)
 {
 	int ret;
@@ -98,9 +102,8 @@ static int __init vgadash_init(void)
 	if (ret)
 		return ret;
 
-
 	vgadash_logtap_init();
-    vgadash_sysrq_init();
+	vgadash_sysrq_init();
 
 	pr_info(VGADASH_NAME ": loaded (console-tap logs enabled)\n");
 	return 0;
@@ -109,8 +112,7 @@ static int __init vgadash_init(void)
 static void __exit vgadash_exit(void)
 {
 	vgadash_logtap_exit();
-    vgadash_sysrq_exit();
-
+	vgadash_sysrq_exit();
 
 	if (g_vgadash.active)
 		vgadash_toggle();

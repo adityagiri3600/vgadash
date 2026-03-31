@@ -64,6 +64,47 @@ static const struct file_operations page_fops = {
 	.llseek = no_llseek,
 };
 
+static ssize_t privacy_read(struct file *f, char __user *ubuf,
+			    size_t len, loff_t *ppos)
+{
+	const char *state = g_vgadash.privacy_mode ? "on\n" : "off\n";
+
+	return simple_read_from_buffer(ubuf, len, ppos, state, strlen(state));
+}
+
+static ssize_t privacy_write(struct file *f, const char __user *ubuf,
+			     size_t len, loff_t *ppos)
+{
+	char buf[16];
+	bool enabled;
+
+	if (len == 0)
+		return 0;
+	if (len >= sizeof(buf))
+		len = sizeof(buf) - 1;
+
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = '\0';
+
+	if (!strncmp(buf, "on", 2) || !strncmp(buf, "1", 1))
+		enabled = true;
+	else if (!strncmp(buf, "off", 3) || !strncmp(buf, "0", 1))
+		enabled = false;
+	else
+		return -EINVAL;
+
+	vgadash_set_privacy(enabled);
+	return len;
+}
+
+static const struct file_operations privacy_fops = {
+	.owner  = THIS_MODULE,
+	.read   = privacy_read,
+	.write  = privacy_write,
+	.llseek = no_llseek,
+};
+
 static int snapshot_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "VGADASH page=%s active=%d\n",
@@ -100,6 +141,7 @@ int vgadash_debugfs_init(void)
 
 	debugfs_create_file("toggle", 0200, g_vgadash.dbg_dir, NULL, &toggle_fops);
 	debugfs_create_file("page",   0600, g_vgadash.dbg_dir, NULL, &page_fops);
+	debugfs_create_file("privacy", 0600, g_vgadash.dbg_dir, NULL, &privacy_fops);
 	debugfs_create_file("snapshot", 0400, g_vgadash.dbg_dir, NULL, &snapshot_fops);
 
 	return 0;
