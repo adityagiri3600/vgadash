@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+MODULE_NAME=vgadash
+MODULE_VERSION=0.1.0
+
+case "$1" in
+	configure)
+		if command -v dkms >/dev/null 2>&1; then
+			dkms add -m "$MODULE_NAME" -v "$MODULE_VERSION" >/dev/null 2>&1 || true
+			if ! dkms autoinstall -m "$MODULE_NAME" -v "$MODULE_VERSION"; then
+				echo "vgadash-dkms: DKMS autoinstall failed." >&2
+				echo "vgadash-dkms: install matching linux-headers and rerun:" >&2
+				echo "  sudo dkms autoinstall -m $MODULE_NAME -v $MODULE_VERSION" >&2
+			fi
+		fi
+		;;
+esac
+
+#DEBHELPER#
