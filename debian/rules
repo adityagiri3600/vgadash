@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$//')
+DKMS_SRC_DIR := debian/vgadash-dkms/usr/src/vgadash-$(UPSTREAM_VERSION)
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	install -d $(DKMS_SRC_DIR)/kernel
+	install -m 0644 kernel/Makefile $(DKMS_SRC_DIR)/kernel/Makefile
+	for f in debugfs.c logtap.c main.c pages_logs.c pages_state.c sysrq.c util.c vga_text.c; do \
+		install -m 0644 kernel/$$f $(DKMS_SRC_DIR)/kernel/$$f; \
+	done
+	for f in logtap.h pages.h sysrq.h util.h vga_text.h vgadash.h; do \
+		install -m 0644 kernel/$$f $(DKMS_SRC_DIR)/kernel/$$f; \
+	done
+	install -m 0644 dkms.conf $(DKMS_SRC_DIR)/dkms.conf
+
+	install -d debian/vgadash-tools/usr/bin
+	install -m 0755 tools/vgadashctl debian/vgadash-tools/usr/bin/vgadashctl

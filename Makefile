@@ -2,10 +2,11 @@
 KVER ?= 5.15.0-164-generic
 KDIR ?= /usr/src/linux-headers-$(KVER)
 PWD  := $(shell pwd)
+PKG_BUILD_DIR ?= /tmp/vgadash-pkgbuild
 
 IMAGE ?= vgadash-dev
 
-.PHONY: all clean docker-build docker-test docker-test-privacy docker-demo docker-shell test demo
+.PHONY: all clean deb docker-build docker-test docker-test-privacy docker-demo docker-shell test demo
 
 all:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
@@ -14,6 +15,20 @@ all:
 clean:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
 	$(MAKE) -C $(KDIR) M=$(PWD)/kernel clean
+
+deb:
+	rm -rf $(PKG_BUILD_DIR)
+	mkdir -p $(PKG_BUILD_DIR)
+	rsync -a --delete \
+	  --exclude .git \
+	  --exclude out \
+	  --exclude '*.deb' \
+	  --exclude '*.build' \
+	  --exclude '*.buildinfo' \
+	  --exclude '*.changes' \
+	  $(PWD)/ $(PKG_BUILD_DIR)/vgadash/
+	cd $(PKG_BUILD_DIR)/vgadash && dpkg-buildpackage -us -uc -b
+	@echo "Packages written under $(PKG_BUILD_DIR)"
 
 
 
