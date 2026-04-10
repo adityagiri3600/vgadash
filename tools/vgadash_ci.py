@@ -331,6 +331,23 @@ def assert_privacy_snapshots(serial_out: str, marker: str) -> None:
         raise AssertionError("Logs snapshot still exposed the marker while privacy mode was enabled")
 
 
+def write_serial_log(cmd: str, kver: str, serial_out: str) -> Path:
+    out_dir = REPO_ROOT / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / f"{cmd}-{kver}-serial.log"
+    log_path.write_text(serial_out, encoding="utf-8", errors="replace")
+    print(f"[vgadash-ci] wrote serial log: {log_path}")
+    return log_path
+
+
+def print_result_summary(cmd: str, ok: bool, *, log_path: Path, detail: Optional[str] = None) -> None:
+    status = "PASS" if ok else "FAIL"
+    print(f"[vgadash-ci] {cmd}: {status}")
+    print(f"[vgadash-ci] serial log: {log_path}")
+    if detail:
+        print(f"[vgadash-ci] detail: {detail}")
+
+
 def publish_result_amqp(amqp_url: str, payload: dict) -> None:
     import pika
     params = pika.URLParameters(amqp_url)
@@ -392,6 +409,8 @@ def main():
     if serial_out:
         print(serial_out)
 
+    log_path = write_serial_log(args.cmd, kver, serial_out)
+
     if args.cmd in ("test", "test-privacy"):
         ok = True
         err = None
@@ -403,8 +422,11 @@ def main():
         except Exception as e:
             ok = False
             err = str(e)
+            print_result_summary(args.cmd, ok=False, log_path=log_path, detail=err)
             raise
         finally:
+            if ok:
+                print_result_summary(args.cmd, ok=True, log_path=log_path)
             if args.amqp_url:
                 payload = {
                     "project": "vgadash",
