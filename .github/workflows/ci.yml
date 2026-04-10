@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper rsync
+
+      - name: Build Debian packages
+        run: make deb
+
+      - name: Upload Debian packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgadash-debs
+          path: |
+            /tmp/vgadash-pkgbuild/*.deb
+            /tmp/vgadash-pkgbuild/*.buildinfo
+            /tmp/vgadash-pkgbuild/*.changes
+          if-no-files-found: error
+
+      - name: Build Docker test image
+        run: make docker-build
+
+      - name: Run snapshot test
+        run: make docker-test
+
+      - name: Run privacy test
+        run: make docker-test-privacy
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgadash-test-logs
+          path: out/*.log
+          if-no-files-found: warn
