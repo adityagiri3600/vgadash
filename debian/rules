@@ -6,6 +6,12 @@ DKMS_SRC_DIR := debian/vgadash-dkms/usr/src/vgadash-$(UPSTREAM_VERSION)
 %:
 	dh $@
 
+override_dh_auto_clean:
+	@echo "Skipping module clean for DKMS source package"
+
+override_dh_auto_build:
+	@echo "Skipping module build for DKMS source package"
+
 override_dh_auto_install:
 	install -d $(DKMS_SRC_DIR)/kernel
 	install -m 0644 kernel/Makefile $(DKMS_SRC_DIR)/kernel/Makefile
