@@ -9,6 +9,15 @@
 make docker-build
 ```
 
+### Package Build
+Build Debian packages for the DKMS module and helper tools:
+```bash
+make deb
+```
+
+On WSL/Windows checkouts, `make deb` stages the build under `/tmp` so
+`dpkg-deb` does not trip over `/mnt/c` permission semantics.
+
 ### Test
 ```bash
 make docker-test
@@ -57,4 +66,20 @@ echo on  > /sys/kernel/debug/vgadash/privacy
 echo off > /sys/kernel/debug/vgadash/privacy
 
 cat /sys/kernel/debug/vgadash/snapshot
+```
+
+Or use the packaged helper:
+```bash
+vgadashctl toggle
+vgadashctl page state
+vgadashctl page logs
+vgadashctl privacy on
+vgadashctl snapshot
+```
+
+Typical package install flow:
+```bash
+sudo apt install ./vgadash-dkms_0.1.0-1_all.deb ./vgadash-tools_0.1.0-1_all.deb
+sudo modprobe vgadash
+vgadashctl status
 ```
