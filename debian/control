@@ -1,0 +1,22 @@
+Source: vgadash
+Section: kernel
+Priority: optional
+Maintainer: Aditya Giri <aditya@example.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: vgadash-dkms
+Architecture: all
+Depends: dkms, ${misc:Depends}
+Description: VGADASH kernel module packaged for DKMS
+ VGADASH is an in-kernel VGA text dashboard for emergency observability.
+ This package installs the module source into /usr/src so DKMS can rebuild
+ and reinstall it automatically when kernels change.
+
+Package: vgadash-tools
+Architecture: all
+Depends: ${misc:Depends}
+Description: helper commands for controlling the VGADASH dashboard
+ This package installs vgadashctl, a small wrapper around the debugfs
+ control plane used by the vgadash kernel module.
