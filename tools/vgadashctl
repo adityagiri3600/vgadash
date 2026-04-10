@@ -1,0 +1,71 @@
+#!/bin/sh
+set -eu
+
+DBG_DIR=${VGADASH_DEBUGFS_DIR:-/sys/kernel/debug/vgadash}
+
+need_debugfs() {
+	if [ ! -d "$DBG_DIR" ]; then
+		echo "vgadashctl: debugfs path not found: $DBG_DIR" >&2
+		echo "vgadashctl: is the vgadash module loaded and debugfs mounted?" >&2
+		exit 1
+	fi
+}
+
+usage() {
+	cat <<'EOF'
+Usage:
+  vgadashctl toggle
+  vgadashctl page <state|logs>
+  vgadashctl privacy <on|off>
+  vgadashctl snapshot
+  vgadashctl status
+EOF
+}
+
+cmd=${1:-}
+
+case "$cmd" in
+	toggle)
+		need_debugfs
+		echo 1 > "$DBG_DIR/toggle"
+		;;
+	page)
+		need_debugfs
+		value=${2:-}
+		case "$value" in
+			state|logs)
+				echo "$value" > "$DBG_DIR/page"
+				;;
+			*)
+				usage >&2
+				exit 2
+				;;
+		esac
+		;;
+	privacy)
+		need_debugfs
+		value=${2:-}
+		case "$value" in
+			on|off)
+				echo "$value" > "$DBG_DIR/privacy"
+				;;
+			*)
+				usage >&2
+				exit 2
+				;;
+		esac
+		;;
+	snapshot)
+		need_debugfs
+		cat "$DBG_DIR/snapshot"
+		;;
+	status)
+		need_debugfs
+		echo "page=$(tr -d '\n' < "$DBG_DIR/page")"
+		echo "privacy=$(tr -d '\n' < "$DBG_DIR/privacy")"
+		;;
+	*)
+		usage >&2
+		exit 2
+		;;
+esac
