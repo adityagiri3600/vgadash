@@ -84,6 +84,16 @@ int vgadash_set_page(enum vgadash_page p)
 	return 0;
 }
 
+void vgadash_show_page(enum vgadash_page p)
+{
+	g_vgadash.page = p;
+	if (g_vgadash.active) {
+		vgadash_render();
+		return;
+	}
+	vgadash_toggle();
+}
+
 void vgadash_set_privacy(bool enabled)
 {
 	g_vgadash.privacy_mode = enabled;

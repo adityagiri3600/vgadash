@@ -37,6 +37,7 @@ extern struct vgadash_ctx g_vgadash;
 void vgadash_render(void);
 void vgadash_toggle(void);
 int  vgadash_set_page(enum vgadash_page p);
+void vgadash_show_page(enum vgadash_page p);
 void vgadash_set_privacy(bool enabled);
 
 
