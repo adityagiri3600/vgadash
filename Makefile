@@ -6,7 +6,7 @@ PKG_BUILD_DIR ?= /tmp/vgadash-pkgbuild
 
 IMAGE ?= vgadash-dev
 
-.PHONY: all clean deb docker-build docker-test docker-test-privacy docker-demo docker-shell test demo
+.PHONY: all clean deb docker-build docker-test docker-test-privacy docker-demo docker-demo-pkg docker-demo-pkg-vnc docker-shell test demo
 
 all:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
@@ -46,6 +46,21 @@ docker-test-privacy:
 docker-demo:
 	docker run --rm -it -v "$(PWD):/work" -w /work $(IMAGE) \
 	  python3 tools/vgadash_ci.py demo --display curses --interactive --timeout 0
+
+docker-demo-pkg: deb
+	docker run --rm -it \
+	  -v "$(PWD):/work" -w /work \
+	  -v "$(PKG_BUILD_DIR):/pkgbuild:ro" \
+	  $(IMAGE) python3 tools/vgadash_ci.py demo-pkg --pkg-dir /pkgbuild \
+	    --display curses --interactive --timeout 0
+
+docker-demo-pkg-vnc: deb
+	docker run --rm -it \
+	  -p 5901:5901 \
+	  -v "$(PWD):/work" -w /work \
+	  -v "$(PKG_BUILD_DIR):/pkgbuild:ro" \
+	  $(IMAGE) python3 tools/vgadash_ci.py demo-pkg --pkg-dir /pkgbuild \
+	    --display vnc --vnc-display 1 --interactive --timeout 0
 
 docker-shell:
 	docker run --rm -it -v "$(PWD):/work" -w /work $(IMAGE) bash

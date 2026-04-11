@@ -91,6 +91,9 @@ def make_initramfs(
     marker: str,
     interactive: bool,
     privacy_test: bool,
+    package_debs: Optional[Tuple[Path, Path]] = None,
+    auto_insmod: bool = True,
+    run_snapshot: bool = True,
 ) -> None:
     busybox = Path("/bin/busybox")
     if not busybox.exists():
@@ -105,7 +108,7 @@ def make_initramfs(
 
         for d in [
             "bin", "sbin", "etc", "proc", "sys", "dev", "tmp",
-            "sys/kernel/debug",
+            "sys/kernel/debug", "usr/bin", "usr/src", "pkg",
         ]:
             (root / d).mkdir(parents=True, exist_ok=True)
 
@@ -123,6 +126,40 @@ def make_initramfs(
 
 
         shutil.copy2(ko_path, root / "vgadash.ko")
+        if package_debs:
+            (root / "usr/lib/vgadash").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ko_path, root / "usr/lib/vgadash" / "vgadash.ko")
+
+        pkg_dkms_name = ""
+        pkg_tools_name = ""
+        if package_debs:
+            pkg_dkms, pkg_tools = package_debs
+            pkg_dkms_name = pkg_dkms.name
+            pkg_tools_name = pkg_tools.name
+
+            shutil.copy2(pkg_dkms, root / "pkg" / pkg_dkms_name)
+            shutil.copy2(pkg_tools, root / "pkg" / pkg_tools_name)
+
+            def _copy_with_libs(bin_path: Path, dst_root: Path) -> None:
+                def _copy_one(src: Path):
+                    rel = src.relative_to("/")
+                    dest = dst_root / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dest)
+
+                out = subprocess.check_output(["ldd", str(bin_path)], text=True)
+                _copy_one(bin_path)
+                for line in out.splitlines():
+                    line = line.strip()
+                    if "=>" in line:
+                        parts = line.split("=>", 1)
+                        path_part = parts[1].strip().split(" ", 1)[0]
+                        if path_part.startswith("/"):
+                            _copy_one(Path(path_part))
+                    elif line.startswith("/"):
+                        _copy_one(Path(line.split(" ", 1)[0]))
+
+            _copy_with_libs(Path("/usr/bin/dpkg-deb"), root)
 
         if privacy_test:
             snapshot_commands = f"""
@@ -156,6 +193,32 @@ echo "===== VGADASH SNAPSHOT END =====" > /dev/ttyS0
 """
 
         init = root / "init"
+        pkg_install = ""
+        if package_debs:
+            pkg_install = f"""
+echo "[init] installing packages (dpkg-deb -x)..."
+dpkg-deb -x /pkg/{pkg_dkms_name} /
+dpkg-deb -x /pkg/{pkg_tools_name} /
+export PATH=/bin:/sbin:/usr/bin
+vgadashctl status || true
+"""
+        insmod_path = "/vgadash.ko"
+        if package_debs:
+            insmod_path = "/usr/lib/vgadash/vgadash.ko"
+
+        insmod_block = f"""
+echo "[init] inserting vgadash.ko..."
+insmod {insmod_path} || {{
+  echo "[init] insmod failed"
+  dmesg | tail -n 80
+  exec /bin/sh
+}}
+""" if auto_insmod else f"""
+echo "[init] module not loaded yet."
+echo "[init] run: insmod {insmod_path}"
+"""
+
+        snapshot_block = snapshot_commands if run_snapshot else ""
         init.write_text(f"""#!/bin/sh
 set -eu
 
@@ -164,17 +227,14 @@ mount -t sysfs sys /sys
 mount -t devtmpfs dev /dev
 mount -t debugfs none /sys/kernel/debug || true
 
-echo "[init] inserting vgadash.ko..."
-insmod /vgadash.ko || {{
-  echo "[init] insmod failed"
-  dmesg | tail -n 80
-  exec /bin/sh
-}}
+{insmod_block}
 
 echo "[init] mount debugfs + toggle dashboard..."
 mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
 
-{snapshot_commands}
+{pkg_install}
+
+{snapshot_block}
 
 echo "[init] done"
 {"exec /bin/cttyhack /bin/sh" if interactive else "poweroff -f"}
@@ -361,7 +421,7 @@ def publish_result_amqp(amqp_url: str, payload: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="VGADASH build/test runner (Docker-friendly, no shell scripts)")
-    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo"], help="Action")
+    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo", "demo-pkg"], help="Action")
     ap.add_argument("--kver", default=None, help="Kernel version to use (auto-detect if omitted)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="QEMU timeout seconds")
     ap.add_argument("--marker", default="HELLO_FROM_VGADASH_TEST", help="Marker string injected into /dev/kmsg")
@@ -369,6 +429,7 @@ def main():
     ap.add_argument("--interactive", action="store_true", help="Drop to shell in guest (initramfs)")
     ap.add_argument("--vnc-display", type=int, default=1, help="QEMU VNC display number (port=5900+N)")
     ap.add_argument("--amqp-url", default=None, help="Optional AMQP URL to publish test results")
+    ap.add_argument("--pkg-dir", default="/tmp/vgadash-pkgbuild", help="Directory containing vgadash-*.deb packages")
     args = ap.parse_args()
 
     kver = detect_kver(args.kver)
@@ -379,6 +440,19 @@ def main():
         print(f"Built module: {ko}")
         return
 
+    package_debs = None
+    if args.cmd == "demo-pkg":
+        pkg_dir = Path(args.pkg_dir)
+        if not pkg_dir.exists():
+            raise FileNotFoundError(f"Package directory not found: {pkg_dir}")
+        dkms = sorted(pkg_dir.glob("vgadash-dkms_*.deb"))
+        tools = sorted(pkg_dir.glob("vgadash-tools_*.deb"))
+        if not dkms or not tools:
+            raise FileNotFoundError(
+                "Could not find vgadash-dkms_*.deb and vgadash-tools_*.deb in "
+                f"{pkg_dir}"
+            )
+        package_debs = (dkms[-1], tools[-1])
 
     ko = build_module(kver)
 
@@ -388,16 +462,18 @@ def main():
         initramfs,
         ko,
         marker=args.marker,
-        interactive=(args.interactive or args.cmd == "demo"),
+        interactive=(args.interactive or args.cmd in ("demo", "demo-pkg")),
         privacy_test=(args.cmd == "test-privacy"),
+        package_debs=package_debs,
+        auto_insmod=(args.cmd not in ("demo", "demo-pkg")),
+        run_snapshot=(args.cmd in ("test", "test-privacy")),
     )
 
     display = args.display
-    if args.cmd == "demo" and display == "none":
+    if args.cmd in ("demo", "demo-pkg") and display == "none":
         display = "vnc"
 
-
-    capture_output = (args.cmd != "demo")
+    capture_output = (args.cmd not in ("demo", "demo-pkg"))
     serial_out = run_qemu(
         vmlinuz,
         initramfs,
