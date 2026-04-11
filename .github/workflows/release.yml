@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper rsync
+
+      - name: Build Debian packages
+        run: make deb
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            /tmp/vgadash-pkgbuild/*.deb
+            /tmp/vgadash-pkgbuild/*.buildinfo
+            /tmp/vgadash-pkgbuild/*.changes
