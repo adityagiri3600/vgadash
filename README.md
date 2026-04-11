@@ -1,5 +1,25 @@
 # VGADASH
 
+A reliable linux kernel module for deterministic testing that renders a
+light weight VGA based dashboard to view kernel logs and system state
+when things go wrong.
+
+Broken userspace? Broken graphics? This will work with the only dependency being
+that your SysRq key works.
+
+### Package Usage
+Install the DKMS module and helper tools, then load the module and use the CLI:
+```bash
+sudo apt install ./vgadash-dkms_0.1.0-1_all.deb ./vgadash-tools_0.1.0-1_all.deb
+sudo modprobe vgadash
+vgadashctl status
+vgadashctl toggle
+vgadashctl page logs
+vgadashctl snapshot
+```
+
+### Build From Source
+
 ### Prereqs
 - Docker
 - On windows: use WSL2
@@ -75,11 +95,4 @@ vgadashctl page state
 vgadashctl page logs
 vgadashctl privacy on
 vgadashctl snapshot
-```
-
-Typical package install flow:
-```bash
-sudo apt install ./vgadash-dkms_0.1.0-1_all.deb ./vgadash-tools_0.1.0-1_all.deb
-sudo modprobe vgadash
-vgadashctl status
 ```
