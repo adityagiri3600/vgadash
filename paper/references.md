@@ -13,3 +13,7 @@
 [7] QEMU Documentation, "System Emulation," available at https://www.qemu.org/docs/master/system/index.html
 
 [8] George Candea and Armando Fox, "Crash-Only Software," Proceedings of the 9th Workshop on Hot Topics in Operating Systems (HotOS IX), 2003.
+
+[9] Alex Depoutovitch and Michael Stumm, "Otherworld: Giving Applications a Chance to Survive OS Kernel Crashes," Proceedings of the 14th ACM SIGOPS International Workshop on Hot Topics in Operating Systems, 2013, available at https://www.usenix.org/conference/hotos13/workshop-program/presentation/depoutovitch
+
+[10] Xinyang Ge, Haowei Wu, Frank Mueller, and Xiangyu Zhang, "Reverse Debugging of Kernel Failures in Deployed Systems," 2020 USENIX Annual Technical Conference (USENIX ATC 20), available at https://www.usenix.org/conference/atc20/presentation/ge

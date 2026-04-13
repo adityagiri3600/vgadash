@@ -1,7 +1,7 @@
 Title: VGADASH: Failure-Time Observability Through a VGA-Resident Kernel Dashboard
-Authors: <Author 1>, <Author 2>, <Author 3>
-Institute: <Department>, <Institute Name>, <City>, <Country>
-Emails: <email1@example.com>, <email2@example.com>, <email3@example.com>
+Authors: Aditya Giri, Harshita Tibra, Armaan Ahmed
+Institute: CSE, Ramdeobaba University, Nagpur
+Emails: giriac@rknec.edu, tibrahd@rknec.edu, ahmeda@rknec.edu
 Keywords: Linux kernel module; failure-time observability; VGA text mode; SysRq; printk; QEMU
 
 ## Abstract
@@ -72,6 +72,8 @@ Packaging may be mentioned in one brief sentence as helping deployment and demon
 
 ## 7. Comparison with Existing Tools
 VGADASH does not replace established kernel debugging tools; it occupies a different point in the design space. SysRq offers emergency commands but does not provide an integrated visual dashboard [1]. Netconsole exports logs to the network, which is powerful when networking is healthy but fragile when the network stack is itself part of the problem [3]. Pstore and ramoops preserve crash records across resets, but they are fundamentally post-event mechanisms [4]. Kdump captures rich crash-state data at significant setup cost and is aimed at post-mortem analysis [5]. Earlyprintk is valuable during early boot but is limited in scope and does not offer a persistent live dashboard view [6].
+
+Related systems work also helps position the project. Crash-only software argues that recovery-oriented systems should reduce the amount of state and machinery required to regain useful operation after failures [8]. That idea aligns with VGADASH's narrow fallback scope: preserve a small but dependable visibility path instead of reconstructing a full debugging environment. Otherworld explores application survival across kernel crashes by shifting recovery into a separate operating environment [9], which is conceptually adjacent but aimed at continuity rather than direct local observability. Reverse Debugging of Kernel Failures in Deployed Systems focuses on reconstructing kernel failures after deployment with reversible execution support [10]. In contrast, VGADASH is intentionally simpler and more immediate: it surfaces live failure-time information on the local screen rather than enabling post-hoc replay or heavyweight crash recovery.
 
 VGADASH is positioned for a narrower question: how much useful observability can be retained for a system that is still alive, but no longer comfortably accessible? Its answer is intentionally lightweight. It focuses on local monitor output, keyboard-driven control, and a unified on-screen view of recent logs and compact system state. This positioning should be emphasized as complementary rather than competitive.
 

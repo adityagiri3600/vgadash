@@ -4,7 +4,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -253,11 +252,79 @@ def keep_section_properties(doc: Document) -> None:
         section.top_margin = section.top_margin
 
 
+def append_page_number_run(paragraph) -> None:
+    run = paragraph.add_run()
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(10)
+
+    fld_begin = OxmlElement("w:fldChar")
+    fld_begin.set(qn("w:fldCharType"), "begin")
+
+    instr_text = OxmlElement("w:instrText")
+    instr_text.set(qn("xml:space"), "preserve")
+    instr_text.text = "PAGE"
+
+    fld_separate = OxmlElement("w:fldChar")
+    fld_separate.set(qn("w:fldCharType"), "separate")
+
+    fld_end = OxmlElement("w:fldChar")
+    fld_end.set(qn("w:fldCharType"), "end")
+
+    run._r.append(fld_begin)
+    run._r.append(instr_text)
+    run._r.append(fld_separate)
+    run._r.append(fld_end)
+
+
+def add_centered_page_numbers(doc: Document) -> None:
+    for section in doc.sections:
+        footer = section.footer
+        for p in list(footer.paragraphs):
+            if p.text.strip():
+                p.clear()
+        paragraph = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in paragraph.runs:
+            run.clear()
+        append_page_number_run(paragraph)
+
+
 def add_reference_paragraph(doc: Document, text: str) -> None:
     p = doc.add_paragraph(style="references")
     run = p.add_run(text)
     run.font.name = "Times New Roman"
     run.font.size = Pt(10)
+
+
+def generate_pdf_with_docker() -> bool:
+    docker = shutil.which("docker")
+    if not docker:
+        return False
+
+    mount_root = ROOT.resolve().parents[1]
+    docx_in_container = Path("/work") / OUTPUT.relative_to(mount_root)
+    outdir_in_container = str((Path("/work") / OUTPUT.parent.relative_to(mount_root)).parent if False else Path("/work") / OUTPUT.parent.relative_to(mount_root))
+
+    cmd = [
+        docker,
+        "run",
+        "--rm",
+        "-v",
+        f"{mount_root}:/work",
+        "-w",
+        "/work",
+        "ubuntu:22.04",
+        "bash",
+        "-lc",
+        (
+            "apt-get update >/dev/null && "
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y libreoffice-writer >/dev/null && "
+            f"soffice --headless --convert-to pdf --outdir {outdir_in_container} "
+            f"{docx_in_container} >/dev/null"
+        ),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return OUTPUT_PDF.exists()
 
 
 def main():
@@ -297,6 +364,8 @@ def main():
     for ref in refs:
         add_reference_paragraph(doc, ref)
 
+    add_centered_page_numbers(doc)
+
     cleanup_output_dir()
     if OUTPUT.exists():
         try:
@@ -332,7 +401,8 @@ def main():
                 OUTPUT_PDF.unlink()
             generated_pdf.rename(OUTPUT_PDF)
     else:
-        print("PDF not generated: soffice is not installed in this environment.")
+        if not generate_pdf_with_docker():
+            print("PDF not generated: neither soffice nor Docker conversion was available.")
 
 
 if __name__ == "__main__":
