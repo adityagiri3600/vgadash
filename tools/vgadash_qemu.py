@@ -19,6 +19,7 @@ DEFAULT_MONITOR_PORT = 4444
 SCRIPT_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_ROOT.parent
 DEFAULT_MODULE_SOURCE = REPO_ROOT / "kernel"
+DEFAULT_SCENARIO_MODULE_SOURCE = REPO_ROOT / "demo" / "probe_hang"
 SYSRQ_ACTION_KEYS = {
     "toggle": "v",
     "logs": "g",
@@ -102,12 +103,22 @@ def build_module(kernel_build: Path, module_source: Path, module_output: Path) -
     return module_output
 
 
+def scenario_module_spec(scenario: str) -> tuple[Optional[Path], Optional[str]]:
+    if scenario == "normal":
+        return None, None
+    if scenario == "probe-hang":
+        return DEFAULT_SCENARIO_MODULE_SOURCE, "demo_probe_hang.ko"
+    raise ValueError(f"Unknown scenario '{scenario}'")
+
+
 def create_overlay(
     overlay_path: Path,
     module_path: Path,
     *,
     start_active: bool = False,
     default_page: str = "state",
+    scenario: str = "normal",
+    scenario_module_path: Optional[Path] = None,
 ) -> Path:
     busybox = find_busybox()
     insmod_args = []
@@ -121,6 +132,15 @@ def create_overlay(
     if insmod_args:
         insmod_cmd += " " + " ".join(insmod_args)
 
+    scenario_insmod = ""
+    if scenario == "probe-hang":
+        if not scenario_module_path:
+            raise ValueError("scenario module path is required for probe-hang")
+        scenario_insmod = """
+echo "[vgadash-init] loading demo_probe_hang.ko" > /dev/kmsg 2>/dev/null || true
+insmod /demo_probe_hang.ko || echo "[vgadash-init] demo_probe_hang insmod failed" > /dev/kmsg 2>/dev/null || true
+"""
+
     with tempfile.TemporaryDirectory(prefix="vgadash_overlay_") as td:
         root = Path(td)
         for d in ("bin", "proc", "sys", "dev", "sys/kernel/debug"):
@@ -133,6 +153,8 @@ def create_overlay(
         sh_link.symlink_to("busybox")
 
         shutil.copy2(module_path, root / "vgadash.ko")
+        if scenario_module_path:
+            shutil.copy2(scenario_module_path, root / "demo_probe_hang.ko")
 
         init = root / "vgadash-init"
         init.write_text(
@@ -146,6 +168,8 @@ mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
 
 echo "[vgadash-init] loading vgadash.ko" > /dev/kmsg 2>/dev/null || true
 {insmod_cmd} || echo "[vgadash-init] vgadash insmod failed" > /dev/kmsg 2>/dev/null || true
+
+{scenario_insmod}
 
 if [ ! -x /init ]; then
   echo "[vgadash-init] original /init not found" > /dev/kmsg 2>/dev/null || true
@@ -359,6 +383,12 @@ def main() -> int:
         choices=("state", "logs"),
         help="Load the module with default_page set to the chosen value",
     )
+    prepare.add_argument(
+        "--scenario",
+        default="normal",
+        choices=("normal", "probe-hang"),
+        help="Optional demo scenario to preload alongside VGADASH",
+    )
     prepare.add_argument("--monitor-host", default=DEFAULT_MONITOR_HOST)
     prepare.add_argument("--monitor-port", type=int, default=DEFAULT_MONITOR_PORT)
 
@@ -399,6 +429,8 @@ def main() -> int:
         else output_initrd.with_name("vgadash.ko")
     )
     overlay_path = output_initrd.with_name("vgadash-overlay.cpio.gz")
+    scenario_source, scenario_ko_name = scenario_module_spec(args.scenario)
+    scenario_module_output = None
 
     if not kernel_build.exists():
         raise FileNotFoundError(f"Kernel build tree not found: {kernel_build}")
@@ -408,11 +440,16 @@ def main() -> int:
         raise FileNotFoundError(f"Module source tree not found: {module_source}")
 
     build_module(kernel_build, module_source, module_output)
+    if scenario_source and scenario_ko_name:
+        scenario_module_output = output_initrd.with_name(scenario_ko_name)
+        build_module(kernel_build, scenario_source, scenario_module_output)
     create_overlay(
         overlay_path,
         module_output,
-        start_active=args.start_active,
-        default_page=args.default_page,
+        start_active=(args.start_active or args.scenario == "probe-hang"),
+        default_page=("logs" if args.scenario == "probe-hang" else args.default_page),
+        scenario=args.scenario,
+        scenario_module_path=scenario_module_output,
     )
     combine_initrds(overlay_path, base_initrd, output_initrd)
     print_prepare_summary(

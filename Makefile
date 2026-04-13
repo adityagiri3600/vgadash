@@ -8,7 +8,7 @@ QEMU_KIT_DIR ?= $(PKG_BUILD_DIR)/qemu-kit
 
 IMAGE ?= vgadash-dev
 
-.PHONY: all clean deb qemu-kit docker-build docker-test docker-test-privacy docker-demo docker-demo-pkg docker-demo-pkg-vnc docker-shell docker-sysrq-toggle docker-sysrq-logs docker-sysrq-state test demo
+.PHONY: all clean deb qemu-kit docker-build docker-test docker-test-privacy docker-demo docker-demo-vnc docker-demo-probe-hang docker-demo-probe-hang-vnc docker-capture-probe-hang docker-demo-pkg docker-demo-pkg-vnc docker-shell docker-sysrq-toggle docker-sysrq-logs docker-sysrq-state test demo
 
 all:
 	@test -e "$(KDIR)/Makefile" || (echo "Missing headers: $(KDIR)"; exit 1)
@@ -99,3 +99,23 @@ docker-demo-vnc:
 	  -p $(MONITOR_PORT):$(MONITOR_PORT) \
 	  -v "$(PWD):/work" -w /work vgadash-dev \
 	  python3 tools/vgadash_ci.py demo --display vnc --vnc-display 1 --interactive --timeout 0 --monitor-host 0.0.0.0 --monitor-port $(MONITOR_PORT)
+
+docker-demo-probe-hang:
+	docker run --rm -it \
+	  -p $(MONITOR_PORT):$(MONITOR_PORT) \
+	  -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py demo --scenario probe-hang \
+	    --display curses --timeout 0 --monitor-host 0.0.0.0 --monitor-port $(MONITOR_PORT)
+
+docker-demo-probe-hang-vnc:
+	docker run --rm -it \
+	  -p 5901:5901 \
+	  -p $(MONITOR_PORT):$(MONITOR_PORT) \
+	  -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py demo --scenario probe-hang \
+	    --display vnc --vnc-display 1 --timeout 0 --monitor-host 0.0.0.0 --monitor-port $(MONITOR_PORT)
+
+docker-capture-probe-hang:
+	docker run --rm \
+	  -v "$(PWD):/work" -w /work $(IMAGE) \
+	  python3 tools/vgadash_ci.py capture-probe-hang --scenario probe-hang

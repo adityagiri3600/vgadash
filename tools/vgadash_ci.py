@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
+from PIL import Image
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_TIMEOUT_S = 60
@@ -20,6 +22,7 @@ VMLINUX_DIR = Path("/boot")
 HEADERS_DIR = Path("/usr/src")
 DEFAULT_MONITOR_HOST = "127.0.0.1"
 DEFAULT_MONITOR_PORT = 4444
+DEFAULT_SCENARIO_MODULE_SOURCE = REPO_ROOT / "demo" / "probe_hang"
 
 SYSRQ_ACTION_KEYS = {
     "toggle": "v",
@@ -81,17 +84,30 @@ def kernel_paths(kver: str) -> Tuple[Path, Path]:
 
 
 def build_module(kver: str) -> Path:
+    return build_module_from_source(kver, REPO_ROOT / "kernel", "vgadash.ko")
+
+
+def build_module_from_source(kver: str, module_source: Path, ko_name: str) -> Path:
     env = os.environ.copy()
     env["KVER"] = kver
 
-    _run(["make", "clean", f"KVER={kver}"], cwd=REPO_ROOT, env=env)
-    _run(["make", f"KVER={kver}"], cwd=REPO_ROOT, env=env)
+    kernel_build = HEADERS_DIR / f"linux-headers-{kver}"
+    _run(["make", "-C", kernel_build, f"M={module_source}", "clean"], env=env)
+    _run(["make", "-C", kernel_build, f"M={module_source}", "modules"], env=env)
 
-    ko = REPO_ROOT / "kernel" / "vgadash.ko"
+    ko = module_source / ko_name
     if not ko.exists():
         raise FileNotFoundError(f"Expected module not found: {ko}")
 
     return ko
+
+
+def scenario_module_spec(scenario: str) -> Tuple[Optional[Path], Optional[str]]:
+    if scenario == "normal":
+        return None, None
+    if scenario == "probe-hang":
+        return DEFAULT_SCENARIO_MODULE_SOURCE, "demo_probe_hang.ko"
+    raise ValueError(f"Unknown scenario '{scenario}'")
 
 
 def make_initramfs(
@@ -104,6 +120,9 @@ def make_initramfs(
     package_debs: Optional[Tuple[Path, Path]] = None,
     auto_insmod: bool = True,
     run_snapshot: bool = True,
+    scenario: str = "normal",
+    scenario_ko_path: Optional[Path] = None,
+    vgadash_params: Optional[list[str]] = None,
 ) -> None:
     busybox = Path("/bin/busybox")
     if not busybox.exists():
@@ -136,6 +155,8 @@ def make_initramfs(
 
 
         shutil.copy2(ko_path, root / "vgadash.ko")
+        if scenario_ko_path:
+            shutil.copy2(scenario_ko_path, root / "demo_probe_hang.ko")
         if package_debs:
             (root / "usr/lib/vgadash").mkdir(parents=True, exist_ok=True)
             shutil.copy2(ko_path, root / "usr/lib/vgadash" / "vgadash.ko")
@@ -215,17 +236,31 @@ vgadashctl status || true
         insmod_path = "/vgadash.ko"
         if package_debs:
             insmod_path = "/usr/lib/vgadash/vgadash.ko"
+        vgadash_arg_string = ""
+        if vgadash_params:
+            vgadash_arg_string = " " + " ".join(vgadash_params)
 
         insmod_block = f"""
 echo "[init] inserting vgadash.ko..."
-insmod {insmod_path} || {{
+insmod {insmod_path}{vgadash_arg_string} || {{
   echo "[init] insmod failed"
   dmesg | tail -n 80
   exec /bin/sh
 }}
 """ if auto_insmod else f"""
 echo "[init] module not loaded yet."
-echo "[init] run: insmod {insmod_path}"
+echo "[init] run: insmod {insmod_path}{vgadash_arg_string}"
+"""
+
+        scenario_block = ""
+        if scenario == "probe-hang":
+            scenario_block = """
+echo "[init] loading demo_probe_hang.ko..."
+insmod /demo_probe_hang.ko || {
+  echo "[init] demo_probe_hang insmod failed"
+  dmesg | tail -n 80
+  exec /bin/sh
+}
 """
 
         snapshot_block = snapshot_commands if run_snapshot else ""
@@ -243,6 +278,8 @@ echo "[init] mount debugfs + toggle dashboard..."
 mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
 
 {pkg_install}
+
+{scenario_block}
 
 {snapshot_block}
 
@@ -360,6 +397,48 @@ def run_qemu(
     return out or ""
 
 
+def launch_qemu(
+    vmlinuz: Path,
+    initramfs: Path,
+    *,
+    display: str,
+    vnc_display: int,
+    capture_output: bool,
+    monitor_host: Optional[str] = None,
+    monitor_port: Optional[int] = None,
+) -> subprocess.Popen:
+    args = [
+        "qemu-system-x86_64",
+        "-m", "512",
+        "-accel", "tcg",
+        "-kernel", str(vmlinuz),
+        "-initrd", str(initramfs),
+        "-append", "console=ttyS0,115200 rdinit=/init nomodeset ignore_loglevel loglevel=7",
+        "-serial", "stdio",
+        "-no-reboot",
+        "-monitor", "none",
+    ]
+
+    if monitor_host and monitor_port:
+        args += ["-qmp", f"tcp:{monitor_host}:{monitor_port},server=on,wait=off,nodelay"]
+
+    if display == "none":
+        args += ["-display", "none"]
+    elif display == "curses":
+        args += ["-display", "curses"]
+    elif display == "vnc":
+        args += ["-display", "none", "-vnc", f"0.0.0.0:{vnc_display}"]
+    else:
+        args += ["-display", display]
+
+    popen_kwargs = {"text": True}
+    if capture_output:
+        popen_kwargs["stdout"] = subprocess.PIPE
+        popen_kwargs["stderr"] = subprocess.STDOUT
+
+    return subprocess.Popen(args, **popen_kwargs)
+
+
 def sysrq_key_for_action(action: str) -> str:
     if len(action) == 1:
         return action
@@ -464,6 +543,38 @@ def send_sysrq_via_monitor(
     return json.dumps(response)
 
 
+def capture_screendump(
+    output_path: Path,
+    *,
+    monitor_socket: Optional[Path] = None,
+    monitor_host: Optional[str] = None,
+    monitor_port: Optional[int] = None,
+) -> None:
+    ppm_path = output_path.with_suffix(".ppm")
+    qemu_ppm_path = str(ppm_path)
+
+    try:
+        rel = ppm_path.relative_to(REPO_ROOT)
+        qemu_ppm_path = str(Path("/work") / rel)
+    except ValueError:
+        pass
+
+    send_qmp_command(
+        {
+            "execute": "screendump",
+            "arguments": {"filename": qemu_ppm_path},
+        },
+        monitor_socket=monitor_socket,
+        monitor_host=monitor_host,
+        monitor_port=monitor_port,
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.open(ppm_path).save(output_path)
+    ppm_path.unlink(missing_ok=True)
+    print(f"[vgadash-ci] wrote screenshot: {output_path}")
+
+
 def assert_snapshot(serial_out: str, marker: str) -> None:
     if "===== VGADASH SNAPSHOT BEGIN =====" not in serial_out:
         raise AssertionError("Did not find snapshot BEGIN marker in serial output")
@@ -509,6 +620,85 @@ def assert_privacy_snapshots(serial_out: str, marker: str) -> None:
         raise AssertionError("Logs snapshot still exposed the marker while privacy mode was enabled")
 
 
+def assert_probe_hang(serial_out: str) -> None:
+    expected_lines = [
+        "demo_probe: probing device 0000:00:03.0",
+        "demo_probe: mapping BAR",
+        "demo_probe: waiting for device ready",
+        "demo_probe: timeout path entered",
+    ]
+    for line in expected_lines:
+        if line not in serial_out:
+            raise AssertionError(f"Missing simulated failure log line: {line}")
+
+
+def capture_probe_hang_evidence(
+    *,
+    vmlinuz: Path,
+    initramfs: Path,
+    kver: str,
+    display: str,
+    vnc_display: int,
+    monitor_socket: Optional[Path],
+    monitor_host: str,
+    monitor_port: int,
+    logs_shot: Path,
+    state_shot: Path,
+    boot_wait_s: float,
+) -> Path:
+    proc = launch_qemu(
+        vmlinuz,
+        initramfs,
+        display=display,
+        vnc_display=vnc_display,
+        capture_output=True,
+        monitor_host=(monitor_host if not monitor_socket else None),
+        monitor_port=(monitor_port if not monitor_socket else None),
+    )
+
+    try:
+        time.sleep(boot_wait_s)
+        send_sysrq_via_monitor(
+            "logs",
+            monitor_socket=monitor_socket,
+            monitor_host=(None if monitor_socket else monitor_host),
+            monitor_port=(None if monitor_socket else monitor_port),
+        )
+        time.sleep(1.0)
+        capture_screendump(
+            logs_shot,
+            monitor_socket=monitor_socket,
+            monitor_host=(None if monitor_socket else monitor_host),
+            monitor_port=(None if monitor_socket else monitor_port),
+        )
+        send_sysrq_via_monitor(
+            "state",
+            monitor_socket=monitor_socket,
+            monitor_host=(None if monitor_socket else monitor_host),
+            monitor_port=(None if monitor_socket else monitor_port),
+        )
+        time.sleep(1.0)
+        capture_screendump(
+            state_shot,
+            monitor_socket=monitor_socket,
+            monitor_host=(None if monitor_socket else monitor_host),
+            monitor_port=(None if monitor_socket else monitor_port),
+        )
+    finally:
+        proc.terminate()
+        try:
+            serial_out, _ = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            serial_out, _ = proc.communicate()
+
+    print(serial_out)
+    log_path = write_serial_log("capture-probe-hang", kver, serial_out)
+    assert_probe_hang(serial_out)
+    print_result_summary("capture-probe-hang", ok=True, log_path=log_path)
+    return log_path
+
+
 def write_serial_log(cmd: str, kver: str, serial_out: str) -> Path:
     out_dir = REPO_ROOT / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -539,12 +729,17 @@ def publish_result_amqp(amqp_url: str, payload: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="VGADASH build/test runner (Docker-friendly, no shell scripts)")
-    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo", "demo-pkg", "send-sysrq"], help="Action")
+    ap.add_argument(
+        "cmd",
+        choices=["build", "test", "test-privacy", "demo", "demo-pkg", "send-sysrq", "capture-probe-hang"],
+        help="Action",
+    )
     ap.add_argument("--kver", default=None, help="Kernel version to use (auto-detect if omitted)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="QEMU timeout seconds")
     ap.add_argument("--marker", default="HELLO_FROM_VGADASH_TEST", help="Marker string injected into /dev/kmsg")
     ap.add_argument("--display", default="none", help="QEMU display: none|curses|gtk|sdl")
     ap.add_argument("--interactive", action="store_true", help="Drop to shell in guest (initramfs)")
+    ap.add_argument("--scenario", default="normal", choices=["normal", "probe-hang"], help="Optional boot scenario")
     ap.add_argument("--vnc-display", type=int, default=1, help="QEMU VNC display number (port=5900+N)")
     ap.add_argument("--amqp-url", default=None, help="Optional AMQP URL to publish test results")
     ap.add_argument("--pkg-dir", default="/tmp/vgadash-pkgbuild", help="Directory containing vgadash-*.deb packages")
@@ -552,6 +747,9 @@ def main():
     ap.add_argument("--monitor-host", default=DEFAULT_MONITOR_HOST, help="QEMU monitor host for demo key injection")
     ap.add_argument("--monitor-port", type=int, default=DEFAULT_MONITOR_PORT, help="QEMU monitor TCP port for demo key injection")
     ap.add_argument("--action", default="toggle", help="SysRq action for send-sysrq: toggle|logs|state or a single letter")
+    ap.add_argument("--logs-shot", default=str(REPO_ROOT / "paper" / "assets" / "screenshot_logs.png"), help="Probe-hang logs screenshot path")
+    ap.add_argument("--state-shot", default=str(REPO_ROOT / "paper" / "assets" / "screenshot_state.png"), help="Probe-hang state screenshot path")
+    ap.add_argument("--boot-wait", type=float, default=6.0, help="Seconds to wait before capturing failure evidence")
     args = ap.parse_args()
     monitor_socket = Path(args.monitor_socket) if args.monitor_socket else None
 
@@ -589,9 +787,16 @@ def main():
         package_debs = (dkms[-1], tools[-1])
 
     ko = build_module(kver)
+    scenario_ko = None
+    scenario_source, scenario_ko_name = scenario_module_spec(args.scenario)
+    if scenario_source and scenario_ko_name:
+        scenario_ko = build_module_from_source(kver, scenario_source, scenario_ko_name)
 
     out_dir = REPO_ROOT / "out"
     initramfs = out_dir / f"initramfs-{kver}.cpio.gz"
+    vgadash_params = None
+    if args.scenario == "probe-hang":
+        vgadash_params = ["start_active=1", "default_page=logs"]
     make_initramfs(
         initramfs,
         ko,
@@ -601,7 +806,28 @@ def main():
         package_debs=package_debs,
         auto_insmod=(args.cmd != "demo-pkg"),
         run_snapshot=(args.cmd in ("test", "test-privacy")),
+        scenario=args.scenario,
+        scenario_ko_path=scenario_ko,
+        vgadash_params=vgadash_params,
     )
+
+    if args.cmd == "capture-probe-hang":
+        if args.scenario != "probe-hang":
+            raise RuntimeError("capture-probe-hang requires --scenario probe-hang")
+        capture_probe_hang_evidence(
+            vmlinuz=vmlinuz,
+            initramfs=initramfs,
+            kver=kver,
+            display=("none" if args.display == "none" else args.display),
+            vnc_display=args.vnc_display,
+            monitor_socket=monitor_socket,
+            monitor_host=args.monitor_host,
+            monitor_port=args.monitor_port,
+            logs_shot=Path(args.logs_shot),
+            state_shot=Path(args.state_shot),
+            boot_wait_s=args.boot_wait,
+        )
+        return
 
     display = args.display
     if args.cmd in ("demo", "demo-pkg") and display == "none":

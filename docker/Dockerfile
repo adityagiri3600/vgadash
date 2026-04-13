@@ -4,7 +4,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
     build-essential \
-    python3 python3-pip \
+    python3 python3-pip python3-pil \
     qemu-system-x86 \
     busybox-static \
     cpio \
