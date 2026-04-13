@@ -43,9 +43,9 @@ void page_state_render_vga(void)
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 7, line, 0x07);
 
 	vga_text_puts_at(g_vgadash.vga_mem, 0, 9, "Controls:", 0x0F);
-	vga_text_puts_at(g_vgadash.vga_mem, 2, 10, "echo 1 > /sys/kernel/debug/vgadash/toggle", 0x07);
-	vga_text_puts_at(g_vgadash.vga_mem, 2, 11, "echo logs|state > /sys/kernel/debug/vgadash/page", 0x07);
-	vga_text_puts_at(g_vgadash.vga_mem, 2, 12, "cat /sys/kernel/debug/vgadash/snapshot", 0x07);
+	vga_text_puts_at(g_vgadash.vga_mem, 2, 10, "Alt+SysRq+v  toggle overlay", 0x07);
+	vga_text_puts_at(g_vgadash.vga_mem, 2, 11, "Alt+SysRq+g  show logs page", 0x07);
+	vga_text_puts_at(g_vgadash.vga_mem, 2, 12, "Alt+SysRq+y  show state page", 0x07);
 }
 
 void page_state_snapshot(struct seq_file *m)

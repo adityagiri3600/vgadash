@@ -48,9 +48,11 @@ static ssize_t page_write(struct file *f, const char __user *ubuf,
 	buf[len] = '\0';
 
 	if (!strncmp(buf, "state", 5))
-		vgadash_set_page(VGADASH_PAGE_STATE);
+		vgadash_set_page(vgadash_page_from_name("state",
+						      VGADASH_PAGE_STATE));
 	else if (!strncmp(buf, "logs", 4))
-		vgadash_set_page(VGADASH_PAGE_LOGS);
+		vgadash_set_page(vgadash_page_from_name("logs",
+						      VGADASH_PAGE_LOGS));
 	else
 		return -EINVAL;
 

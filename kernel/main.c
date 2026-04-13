@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/moduleparam.h>
 
 #include "vgadash.h"
 #include "vga_text.h"
@@ -10,6 +11,25 @@
 #include "sysrq.h"
 
 struct vgadash_ctx g_vgadash;
+static bool start_active;
+static char *default_page = "state";
+
+module_param(start_active, bool, 0444);
+module_param(default_page, charp, 0444);
+MODULE_PARM_DESC(start_active, "Show VGADASH immediately when the module loads");
+MODULE_PARM_DESC(default_page, "Default page on load: 'state' or 'logs'");
+
+enum vgadash_page vgadash_page_from_name(const char *name,
+					 enum vgadash_page fallback)
+{
+	if (!name)
+		return fallback;
+	if (!strcmp(name, "logs"))
+		return VGADASH_PAGE_LOGS;
+	if (!strcmp(name, "state"))
+		return VGADASH_PAGE_STATE;
+	return fallback;
+}
 
 static void render_header(void)
 {
@@ -106,7 +126,7 @@ static int __init vgadash_init(void)
 	int ret;
 
 	memset(&g_vgadash, 0, sizeof(g_vgadash));
-	g_vgadash.page = VGADASH_PAGE_STATE;
+	g_vgadash.page = vgadash_page_from_name(default_page, VGADASH_PAGE_STATE);
 
 	ret = vgadash_debugfs_init();
 	if (ret)
@@ -116,6 +136,9 @@ static int __init vgadash_init(void)
 	vgadash_sysrq_init();
 
 	pr_info(VGADASH_NAME ": loaded (console-tap logs enabled)\n");
+	if (start_active)
+		vgadash_toggle();
+
 	return 0;
 }
 

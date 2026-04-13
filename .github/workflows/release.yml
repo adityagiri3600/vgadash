@@ -23,6 +23,9 @@ jobs:
       - name: Build Debian packages
         run: make deb
 
+      - name: Build QEMU kit
+        run: make qemu-kit
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -30,3 +33,4 @@ jobs:
             /tmp/vgadash-pkgbuild/*.deb
             /tmp/vgadash-pkgbuild/*.buildinfo
             /tmp/vgadash-pkgbuild/*.changes
+            /tmp/vgadash-pkgbuild/vgadash-qemu-kit.tar.gz

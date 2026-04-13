@@ -9,3 +9,8 @@
 modules.order
 Module.symvers
 .kernel-version
+__pycache__/
+paper/output/*_updated.docx
+paper/output/*_updated.pdf
+paper/output/~$*
+paper/template/~$*

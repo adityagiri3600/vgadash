@@ -39,6 +39,8 @@ void vgadash_toggle(void);
 int  vgadash_set_page(enum vgadash_page p);
 void vgadash_show_page(enum vgadash_page p);
 void vgadash_set_privacy(bool enabled);
+enum vgadash_page vgadash_page_from_name(const char *name,
+					 enum vgadash_page fallback);
 
 
 int  vgadash_debugfs_init(void);

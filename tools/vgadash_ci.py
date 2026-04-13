@@ -5,9 +5,11 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -16,6 +18,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUT_S = 60
 VMLINUX_DIR = Path("/boot")
 HEADERS_DIR = Path("/usr/src")
+DEFAULT_MONITOR_HOST = "127.0.0.1"
+DEFAULT_MONITOR_PORT = 4444
+
+SYSRQ_ACTION_KEYS = {
+    "toggle": "v",
+    "logs": "g",
+    "state": "y",
+}
 
 
 def _run(cmd, *, cwd=None, capture=False, text=True, check=True, timeout=None, env=None):
@@ -282,6 +292,8 @@ def run_qemu(
     display: str,
     vnc_display: int,
     capture_output: bool,
+    monitor_host: Optional[str] = None,
+    monitor_port: Optional[int] = None,
 ) -> str:
 
     args = [
@@ -293,18 +305,20 @@ def run_qemu(
         "-append", "console=ttyS0,115200 rdinit=/init nomodeset ignore_loglevel loglevel=7",
         "-serial", "stdio",
         "-no-reboot",
+        "-monitor", "none",
     ]
 
+    if monitor_host and monitor_port:
+        args += ["-qmp", f"tcp:{monitor_host}:{monitor_port},server=on,wait=off,nodelay"]
+
     if display == "none":
-        args += ["-display", "none", "-monitor", "none"]
+        args += ["-display", "none"]
     elif display == "curses":
-        args += ["-display", "curses", "-monitor", "none"]
+        args += ["-display", "curses"]
     elif display == "vnc":
-
-
-        args += ["-display", "none", "-vnc", f"0.0.0.0:{vnc_display}", "-monitor", "none"]
+        args += ["-display", "none", "-vnc", f"0.0.0.0:{vnc_display}"]
     else:
-        args += ["-display", display, "-monitor", "none"]
+        args += ["-display", display]
 
 
 
@@ -344,6 +358,110 @@ def run_qemu(
         raise RuntimeError(f"qemu failed with exit code {proc.returncode}")
 
     return out or ""
+
+
+def sysrq_key_for_action(action: str) -> str:
+    if len(action) == 1:
+        return action
+    try:
+        return SYSRQ_ACTION_KEYS[action]
+    except KeyError as exc:
+        raise ValueError(f"Unknown SysRq action '{action}'") from exc
+
+
+def _recv_qmp_message(sock: socket.socket) -> dict:
+    data = b""
+    while b"\n" not in data:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise RuntimeError("QMP connection closed unexpectedly")
+        data += chunk
+    line, _sep, _rest = data.partition(b"\n")
+    return json.loads(line.decode())
+
+
+def _send_qmp_command(sock: socket.socket, payload: dict) -> dict:
+    sock.sendall((json.dumps(payload) + "\r\n").encode())
+    while True:
+        msg = _recv_qmp_message(sock)
+        if "event" in msg:
+            continue
+        return msg
+
+
+def send_qmp_command(
+    payload: dict,
+    *,
+    timeout_s: float = 5.0,
+    monitor_socket: Optional[Path] = None,
+    monitor_host: Optional[str] = None,
+    monitor_port: Optional[int] = None,
+) -> dict:
+    deadline = time.time() + timeout_s
+    sock: socket.socket
+    if monitor_socket:
+        while time.time() < deadline:
+            if monitor_socket.exists():
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError(f"QEMU monitor socket not found: {monitor_socket}")
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connect_target = str(monitor_socket)
+    else:
+        if not monitor_host or not monitor_port:
+            raise RuntimeError("No QEMU monitor endpoint configured")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        connect_target = (monitor_host, monitor_port)
+
+    with sock:
+        sock.settimeout(timeout_s)
+        while True:
+            try:
+                sock.connect(connect_target)
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    raise RuntimeError(f"Could not connect to QEMU monitor at {connect_target}")
+                time.sleep(0.1)
+
+        _recv_qmp_message(sock)
+        response = _send_qmp_command(sock, {"execute": "qmp_capabilities"})
+        if "error" in response:
+            raise RuntimeError(f"QMP capabilities negotiation failed: {response}")
+
+        response = _send_qmp_command(sock, payload)
+        if "error" in response:
+            raise RuntimeError(f"QMP command failed: {response}")
+        return response
+
+
+def send_sysrq_via_monitor(
+    action: str,
+    *,
+    monitor_socket: Optional[Path] = None,
+    monitor_host: Optional[str] = None,
+    monitor_port: Optional[int] = None,
+) -> str:
+    key = sysrq_key_for_action(action)
+    response = send_qmp_command(
+        {
+            "execute": "send-key",
+            "arguments": {
+                "keys": [
+                    {"type": "qcode", "data": "alt"},
+                    {"type": "qcode", "data": "sysrq"},
+                    {"type": "qcode", "data": key},
+                ],
+                "hold-time": 200,
+            },
+        },
+        monitor_socket=monitor_socket,
+        monitor_host=monitor_host,
+        monitor_port=monitor_port,
+    )
+    print(f"[vgadash-ci] sent QMP SysRq sequence: alt+sysrq+{key}")
+    return json.dumps(response)
 
 
 def assert_snapshot(serial_out: str, marker: str) -> None:
@@ -421,7 +539,7 @@ def publish_result_amqp(amqp_url: str, payload: dict) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="VGADASH build/test runner (Docker-friendly, no shell scripts)")
-    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo", "demo-pkg"], help="Action")
+    ap.add_argument("cmd", choices=["build", "test", "test-privacy", "demo", "demo-pkg", "send-sysrq"], help="Action")
     ap.add_argument("--kver", default=None, help="Kernel version to use (auto-detect if omitted)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S, help="QEMU timeout seconds")
     ap.add_argument("--marker", default="HELLO_FROM_VGADASH_TEST", help="Marker string injected into /dev/kmsg")
@@ -430,7 +548,23 @@ def main():
     ap.add_argument("--vnc-display", type=int, default=1, help="QEMU VNC display number (port=5900+N)")
     ap.add_argument("--amqp-url", default=None, help="Optional AMQP URL to publish test results")
     ap.add_argument("--pkg-dir", default="/tmp/vgadash-pkgbuild", help="Directory containing vgadash-*.deb packages")
+    ap.add_argument("--monitor-socket", default=None, help="Optional path to a QEMU monitor socket")
+    ap.add_argument("--monitor-host", default=DEFAULT_MONITOR_HOST, help="QEMU monitor host for demo key injection")
+    ap.add_argument("--monitor-port", type=int, default=DEFAULT_MONITOR_PORT, help="QEMU monitor TCP port for demo key injection")
+    ap.add_argument("--action", default="toggle", help="SysRq action for send-sysrq: toggle|logs|state or a single letter")
     args = ap.parse_args()
+    monitor_socket = Path(args.monitor_socket) if args.monitor_socket else None
+
+    if args.cmd == "send-sysrq":
+        response = send_sysrq_via_monitor(
+            args.action,
+            monitor_socket=monitor_socket,
+            monitor_host=args.monitor_host,
+            monitor_port=args.monitor_port,
+        )
+        if response.strip():
+            print(response)
+        return
 
     kver = detect_kver(args.kver)
     vmlinuz, _headers = kernel_paths(kver)
@@ -465,7 +599,7 @@ def main():
         interactive=(args.interactive or args.cmd in ("demo", "demo-pkg")),
         privacy_test=(args.cmd == "test-privacy"),
         package_debs=package_debs,
-        auto_insmod=(args.cmd not in ("demo", "demo-pkg")),
+        auto_insmod=(args.cmd != "demo-pkg"),
         run_snapshot=(args.cmd in ("test", "test-privacy")),
     )
 
@@ -481,6 +615,8 @@ def main():
         display=display,
         vnc_display=args.vnc_display,
         capture_output=capture_output,
+        monitor_host=(args.monitor_host if args.cmd in ("demo", "demo-pkg") and not monitor_socket else None),
+        monitor_port=(args.monitor_port if args.cmd in ("demo", "demo-pkg") and not monitor_socket else None),
     )
     if serial_out:
         print(serial_out)

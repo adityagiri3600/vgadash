@@ -1,18 +1,50 @@
 # VGADASH
 
-A reliable linux kernel module for deterministic testing that renders a
-light weight VGA based dashboard to view kernel logs and system state
-when things go wrong.
+A Linux fallback observability layer for kernels that are still alive but
+no longer practical to debug through normal userspace paths.
 
-Broken userspace? Broken graphics? This will work with the only dependency being
-that your SysRq key works.
+Broken userspace, broken graphics, or dead SSH is exactly the point. VGADASH
+keeps a local VGA text dashboard reachable through SysRq so you can still see
+recent kernel logs and a compact state summary.
+
+### QEMU Kernel-Dev Quick Start
+If you are iterating on a kernel in QEMU, do not clone the whole repo. Download
+`vgadash-qemu-kit.tar.gz` from [Releases](https://github.com/adityagiri3600/vgadash/releases/),
+extract it, and prepare a VGADASH-enabled initrd overlay:
+
+```bash
+python3 tools/vgadash_qemu.py prepare \
+  --kernel-build /path/to/linux/build \
+  --base-initrd /path/to/initrd.img \
+  --output-initrd /path/to/initrd.vgadash.img \
+  --start-active \
+  --default-page logs
+```
+
+Then update your QEMU boot:
+
+- replace your original `-initrd` with the generated `initrd.vgadash.img`
+- add `rdinit=/vgadash-init` to your kernel command line
+- add `-qmp tcp:127.0.0.1:4444,server=on,wait=off,nodelay`
+
+Now drive VGADASH from the host, with no guest-shell dependency:
+
+```bash
+python3 tools/vgadash_qemu.py send-sysrq --action logs --monitor-port 4444
+python3 tools/vgadash_qemu.py send-sysrq --action state --monitor-port 4444
+python3 tools/vgadash_qemu.py send-sysrq --action toggle --monitor-port 4444
+```
 
 ### Package Usage
-Install the [DKMS module](https://github.com/adityagiri3600/vgadash/releases/) and load the module:
+If you want VGADASH installed inside a normal distro instead of preloaded into a
+QEMU boot path, install the [DKMS module](https://github.com/adityagiri3600/vgadash/releases/)
+and load it:
+
 ```bash
 sudo apt install ./vgadash-dkms_0.1.0-1_all.deb ./vgadash-tools_0.1.0-1_all.deb
 sudo modprobe vgadash
 ```
+
 Then use SysRq keys:
 - `Alt+SysRq+v` toggle overlay
 - `Alt+SysRq+g` show logs page
