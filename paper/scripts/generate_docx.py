@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 from docx import Document
+from docx.enum.section import WD_SECTION_START
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -108,8 +109,8 @@ def add_figure(doc: Document, name: str, caption: str) -> None:
     with Image.open(image_path) as img:
         width_px, height_px = img.size
 
-    max_width = 6.2
-    max_height = 4.6
+    max_width = 3.15
+    max_height = 3.8
     aspect = width_px / height_px
     width = max_width
     height = width / aspect
@@ -138,6 +139,7 @@ def add_comparison_table(doc: Document) -> None:
     run.font.size = Pt(9)
 
     table = doc.add_table(rows=1, cols=5)
+    table.autofit = False
     hdr = table.rows[0].cells
     headers = ["Tool", "Works without userspace", "Needs network", "On-screen visibility", "Best fit"]
     for cell, text in zip(hdr, headers):
@@ -156,12 +158,17 @@ def add_comparison_table(doc: Document) -> None:
         for cell, text in zip(cells, row):
             cell.text = text
 
+    widths = [0.72, 0.85, 0.6, 0.72, 1.55]
+    for row in table.rows:
+        for cell, width in zip(row.cells, widths):
+            cell.width = Inches(width)
+
     for row in table.rows:
         for cell in row.cells:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.font.name = "Times New Roman"
-                    run.font.size = Pt(9)
+                    run.font.size = Pt(8)
     tbl = table._tbl
     tbl_pr = tbl.tblPr
     borders = OxmlElement("w:tblBorders")
@@ -252,6 +259,27 @@ def keep_section_properties(doc: Document) -> None:
         section.top_margin = section.top_margin
 
 
+def configure_double_column_section(section) -> None:
+    section.left_margin = Inches(0.75)
+    section.right_margin = Inches(0.75)
+    section.top_margin = Inches(0.75)
+    section.bottom_margin = Inches(0.75)
+
+    sect_pr = section._sectPr
+    cols = sect_pr.xpath("./w:cols")
+    cols_el = cols[0] if cols else OxmlElement("w:cols")
+    cols_el.set(qn("w:num"), "2")
+    cols_el.set(qn("w:space"), "720")
+    if not cols:
+        sect_pr.append(cols_el)
+
+
+def insert_double_column_section(doc: Document):
+    section = doc.add_section(WD_SECTION_START.CONTINUOUS)
+    configure_double_column_section(section)
+    return section
+
+
 def append_page_number_run(paragraph) -> None:
     run = paragraph.add_run()
     run.font.name = "Times New Roman"
@@ -340,6 +368,7 @@ def main():
     add_centered_paragraph(doc, meta["Institute"], 11, bold=False)
     add_centered_paragraph(doc, meta["Emails"], 10, bold=False)
 
+    body_section_started = False
     first = True
     for section in sections:
         title = section["title"]
@@ -347,8 +376,14 @@ def main():
             text = " ".join(block[1] for block in section["blocks"] if block[0] == "paragraph")
             add_abstract(doc, text)
             add_keywords(doc, meta["Keywords"])
+            insert_double_column_section(doc)
+            body_section_started = True
             first = False
             continue
+
+        if not body_section_started:
+            insert_double_column_section(doc)
+            body_section_started = True
 
         add_heading(doc, title, section["level"])
         for block in section["blocks"]:
